@@ -1,0 +1,113 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prancha Humanizada · Morais Engenharia</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --azul:#295778;--azul-esc:#1e3f58;--teal:#8FDCD2;--verde:#2a9d5c;
+  --bg:#EAF1F3;--bg2:#F5F9FA;--border:#b8d0da;--border2:#d0e4ec;
+  --text:#1a3347;--text3:#5a8099;--branco:#fff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.55}
+.topo{background:var(--azul-esc);color:#fff;padding:26px 20px}
+.wrap{max-width:940px;margin:0 auto;padding:0 20px}
+.topo h1{font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:800;letter-spacing:.5px}
+.topo p{color:var(--teal);font-size:13px;margin-top:2px}
+.voltar{display:inline-block;color:var(--teal);font-size:12px;text-decoration:none;margin-bottom:10px}
+.voltar:hover{text-decoration:underline}
+main{padding:26px 0 60px}
+.card{background:var(--branco);border:1px solid var(--border2);border-radius:12px;padding:20px 22px;margin-bottom:18px}
+h2{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:800;color:var(--azul);
+   text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px}
+p+p,ol,ul{margin-top:9px}
+ol,ul{padding-left:20px}li{margin:5px 0}
+code{background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:1px 5px;font-size:12.5px}
+pre{background:var(--azul-esc);color:#dff1ef;border-radius:8px;padding:13px 15px;overflow-x:auto;font-size:12.5px;margin-top:9px}
+pre code{background:none;border:0;color:inherit;padding:0}
+table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--border2)}
+th{color:var(--text3);font-size:11.5px;text-transform:uppercase;letter-spacing:.5px}
+.aviso{border-left:3px solid var(--verde);background:var(--bg2);padding:11px 14px;border-radius:0 8px 8px 0;font-size:13.5px}
+.alerta{border-left-color:#c0392b}
+figure{margin-top:12px}
+figure img{width:100%;border:1px solid var(--border2);border-radius:8px;display:block;background:#fff}
+figcaption{color:var(--text3);font-size:12px;margin-top:6px}
+footer{color:var(--text3);font-size:12px;text-align:center;padding:18px 0 34px}
+</style>
+
+<div class="topo"><div class="wrap">
+  <a class="voltar" href="https://devmoraiseng.github.io/PORTAL-MORAIS/">← Portal Morais</a>
+  <h1>Prancha Humanizada</h1>
+  <p>Planta do Revit → prancha de venda no papel timbrado</p>
+</div></div>
+
+<main class="wrap">
+
+  <div class="card">
+    <h2>O que faz</h2>
+    <p>Lê o PDF vetorial que sai do Revit, redesenha a planta com acabamento de
+    apresentação e monta a prancha no timbrado da empresa, junto com a fachada 3D,
+    as características da casa e o quadro de áreas.</p>
+    <div class="aviso"><b>Não inventa nada.</b> Nome de ambiente, área em m² e
+    geometria saem do próprio arquivo. O que o projeto não nomeia — escada, quintal,
+    calçada, árvore — fica exatamente como veio. E o programa confere cada área
+    reconstruída contra a área escrita na planta: se algo passar da tolerância,
+    ele avisa em vez de entregar errado calado.</div>
+  </div>
+
+  <div class="card">
+    <h2>Como rodar</h2>
+    <ol>
+      <li>Coloque <code>PLANTA.pdf</code> e <code>3D.pdf</code> na pasta
+          <code>entrada/</code> deste repositório (botão <b>Add file → Upload files</b>).</li>
+      <li>Aba <b>Actions</b> → <b>Gerar prancha</b> → <b>Run workflow</b>.
+          Preencha o título e, se souber, a área do lote.</li>
+      <li>Quando terminar, baixe o artefato <b>prancha</b>: vem o
+          <code>PRANCHA.pdf</code> e o <code>PRANCHA_conferencia.json</code>
+          com a conferência de áreas.</li>
+    </ol>
+    <p>Para rodar no computador, dentro da pasta <code>app/</code>:</p>
+<pre><code>pip install -r requirements.txt
+python main.py --planta ../entrada/PLANTA.pdf --fachada ../entrada/3D.pdf \
+               --titulo "CASA 1 E 2" --lote 90.00 --moveis blocos \
+               --saida PRANCHA.pdf</code></pre>
+  </div>
+
+  <div class="card">
+    <h2>Opções</h2>
+    <table>
+      <tr><th>opção</th><th>o que faz</th></tr>
+      <tr><td><code>--moveis blocos</code></td><td>repinta a pegada do móvel do projeto como bloco, com sombra</td></tr>
+      <tr><td><code>--paleta cor</code></td><td>versão mais quente; o padrão é a paleta neutra</td></tr>
+      <tr><td><code>--piso "AMBIENTE=concreto"</code></td><td>corrige o acabamento de um ambiente</td></tr>
+      <tr><td><code>--nome "DE=PARA"</code></td><td>renomeia o ambiente na peça de venda</td></tr>
+      <tr><td><code>--escala 100</code></td><td>força a escala quando a detecção avisar que não confia</td></tr>
+      <tr><td><code>--pagina 1</code></td><td>processa a segunda página do PDF</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Exemplos</h2>
+    <figure>
+      <img src="exemplos/ANTES_DEPOIS.png" alt="Casa 1 e 2 — original e humanizada">
+      <figcaption>Casa 1 e 2 — mesma geometria, mesmos ambientes, mesmas áreas.</figcaption>
+    </figure>
+    <figure>
+      <img src="exemplos/RPB24_ANTES_DEPOIS.png" alt="RPB 24 — original e humanizada">
+      <figcaption>RPB 24 QD 29 LT 42 — escada, quintal e árvores preservados por não terem rótulo.</figcaption>
+    </figure>
+  </div>
+
+  <div class="card">
+    <h2>Token</h2>
+    <div class="aviso alerta">Esta automação <b>não usa token nenhum</b>: roda
+    100% offline. Se um dia entrar chamada de IA para texto, a chave vai em
+    <b>Settings → Secrets and variables → Actions</b> — nunca no HTML, no JS ou
+    commitada no repositório.</div>
+  </div>
+
+</main>
+
+<footer>Morais Engenharia e Construção · automação interna</footer>

@@ -1,0 +1,16 @@
+# credenciais — NUNCA versionar
+.env
+.env.*
+*.key
+*.pem
+
+# ambiente local
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# saída gerada
+PRANCHA*.pdf
+PRANCHA*.json
+timbrado_fundo.jpg

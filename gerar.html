@@ -31,7 +31,8 @@ label{display:block;font-size:11.5px;text-transform:uppercase;letter-spacing:.5p
 input,select{width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;
   font-family:inherit;font-size:14px;color:var(--text);background:#fff}
 input:focus,select:focus{outline:2px solid var(--teal);outline-offset:-1px}
-.campos{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:12px}
+.campos{display:grid;grid-template-columns:2fr 1.4fr;gap:12px}
+.campos.tres{grid-template-columns:1fr 1fr 1fr}
 @media(max-width:760px){.campos{grid-template-columns:1fr 1fr}}
 .btn{background:var(--verde);color:#fff;border:0;border-radius:9px;padding:12px 22px;
   font-family:inherit;font-size:15px;font-weight:700;cursor:pointer}
@@ -50,6 +51,7 @@ td select,td input{padding:5px 7px;font-size:12.5px}
 .tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:20px}
 .ok{background:#e6f6ec;color:var(--verde-esc)}
 .at{background:#fdeeec;color:var(--vermelho)}
+.obs{font-size:11.5px;color:var(--text3);margin-top:3px;max-width:230px;line-height:1.35}
 .aviso{border-left:3px solid var(--verde);background:var(--bg2);padding:10px 13px;
   border-radius:0 8px 8px 0;font-size:13px;margin-top:12px}
 .aviso.alerta{border-left-color:var(--vermelho)}
@@ -90,27 +92,16 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
     <h2>2 · Dados da casa</h2>
     <div class="campos">
       <div><label>Título da prancha</label><input id="titulo" placeholder="deixe vazio para não sair título"></div>
-      <div><label>Mobiliário</label>
-        <select id="moveis">
-          <option value="blocos">Blocos</option>
-          <option value="traco">Traço do projeto</option>
-        </select></div>
-      <div><label>Paleta</label>
-        <select id="paleta">
-          <option value="neutra">Neutra</option>
-          <option value="cor">Cor</option>
-        </select></div>
-      <div><label>Numeração</label>
+      <div><label>Numeração dos ambientes</label>
         <select id="semnum">
           <option value="0">QUARTO 01, BANHO 02…</option>
           <option value="1">Sem número: QUARTO, BANHO</option>
         </select></div>
     </div>
-    <div class="campos" style="margin-top:12px">
+    <div class="campos tres" style="margin-top:12px">
       <div><label>Área construída (m²)</label><input id="construida" inputmode="decimal" placeholder="soma dos ambientes"></div>
       <div><label>Área de quintal (m²)</label><input id="quintal" inputmode="decimal" placeholder="soma das descobertas"></div>
       <div><label>Área do lote (m²)</label><input id="lote" inputmode="decimal" placeholder="da matrícula"></div>
-      <div></div>
     </div>
     <div class="aviso">Os três campos de área são números de projeto e matrícula.
       Deixe vazio para usar a soma dos ambientes da planta — quando você digita,
@@ -121,11 +112,15 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
     <h2>3 · Confira os ambientes</h2>
     <p style="font-size:13.5px">Nome, área e posição saem do próprio arquivo. O que você
       decide aqui é o <b>acabamento do piso</b> e o <b>nome que vai na peça de venda</b>.</p>
+    <div class="aviso"><b>Conferência</b>: o programa reconstrói cada ambiente a partir
+      das paredes e compara com a área escrita na planta. Bateu, ele repinta. Não bateu,
+      ele <b>não repinta aquele ambiente</b> — fica o desenho original ali, e o motivo
+      aparece na linha. É a garantia de que ele nunca pinta piso no lugar errado.</div>
     <div style="overflow-x:auto;margin-top:10px">
       <table id="t-amb">
         <thead><tr>
           <th>Ambiente (projeto)</th><th>Nome na peça de venda</th>
-          <th class="num">Área</th><th class="num">Conferência</th><th>Acabamento</th>
+          <th class="num">Área</th><th>Conferência</th><th>Acabamento</th>
         </tr></thead><tbody></tbody>
       </table>
     </div>
@@ -232,15 +227,16 @@ function pintarAmbientes() {
   const tb = $("t-amb").querySelector("tbody"); tb.innerHTML = "";
   for (const a of leitura.ambientes) {
     const tr = document.createElement("tr");
-    const ok = a.erro <= 8;
+    const ok = a.confiavel;
     tr.innerHTML =
       `<td>${a.nome}</td>` +
       `<td><input data-nome="${a.nome}" value="${a.rotulo}"></td>` +
       `<td class="num">${a.area.toFixed(2).replace(".", ",")} m²</td>` +
-      `<td class="num"><span class="tag ${ok ? "ok" : "at"}">${ok ? "confere" : "erro " + a.erro + "%"}</span></td>` +
-      `<td><select data-piso="${a.nome}">` +
+      `<td><span class="tag ${ok ? "ok" : "at"}">${ok ? "confere · vai ser repintado" : "não repintado"}</span>` +
+        (ok ? "" : `<div class="obs">${a.motivo}</div>`) + `</td>` +
+      `<td>` + (ok ? `<select data-piso="${a.nome}">` +
         leitura.acabamentos.map(x => `<option value="${x}"${x === a.acabamento ? " selected" : ""}>${x}</option>`).join("") +
-      `</select></td>`;
+      `</select>` : "—") + `</td>`;
     tb.appendChild(tr);
   }
   $("c-ambientes").classList.remove("esconde");
@@ -268,7 +264,6 @@ $("b-gerar").onclick = () => {
     tipo: "gerar", planta: arq.planta, fachada: arq.fachada,
     titulo: $("titulo").value.trim(), lote: num("lote"),
     construida: num("construida"), quintal: num("quintal"),
-    moveis: $("moveis").value, paleta: $("paleta").value,
     semNumero: $("semnum").value === "1",
     pisos: coletar("piso"), apelidos: coletar("nome"),
   });
@@ -282,9 +277,10 @@ function entregar(d) {
   $("c-saida").classList.remove("esconde");
   $("b-baixar").classList.remove("esconde");
   $("b-gerar").disabled = false;
-  const fora = d.conferencia.filter(x => x.erro > 8).map(x => x.nome);
-  status(fora.length ? "Prancha pronta. Revise visualmente: " + fora.join(", ")
-                     : "Prancha pronta. Todos os ambientes conferem.", false);
+  const fora = d.conferencia.filter(x => !x.confiavel).map(x => x.nome);
+  status(fora.length
+    ? `Prancha pronta. ${d.conferencia.length - fora.length} de ${d.conferencia.length} ambientes repintados; sem repintar: ${fora.join(", ")}.`
+    : "Prancha pronta. Todos os ambientes conferem e foram repintados.", false);
   barra(100);
 }
 

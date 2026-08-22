@@ -82,7 +82,7 @@ onmessage = async (e) => {
     if (m.tipo === "gerar") {
       aviso("Reconstruindo os ambientes…", 25);
       const r = api.gerar(
-        m.planta, m.fachada, m.titulo, m.lote, m.moveis, m.paleta,
+        m.planta, m.fachada, m.titulo, m.lote,
         m.pagina || 0, m.escala || null,
         pyodide.toPy(m.pisos || {}), pyodide.toPy(m.apelidos || {}),
         m.timbrado || null, m.construida || null, m.quintal || null,

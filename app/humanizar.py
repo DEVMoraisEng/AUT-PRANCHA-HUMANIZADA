@@ -362,10 +362,9 @@ def _piso_nao_atravessa_parede(seg, livre):
 
 
 def _fonte(tam, negrito=True):
-    cam = ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if negrito
-           else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    from prancha import fonte_arquivo
     try:
-        return ImageFont.truetype(cam, tam)
+        return ImageFont.truetype(fonte_arquivo(negrito), tam)
     except OSError:
         return ImageFont.load_default()
 

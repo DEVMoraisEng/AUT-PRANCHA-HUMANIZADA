@@ -4,6 +4,21 @@ titulo + planta humanizada + fachada 3D + descricao + quadro de areas.
 Todo numero que aparece aqui vem da planta. Nada e estimado.
 """
 import re, io
+import os
+
+_AQUI = os.path.dirname(os.path.abspath(__file__))
+
+
+def fonte_arquivo(negrito=False):
+    """Acha a fonte: primeiro a que vem junto com o programa (funciona no
+    navegador, onde nao existe /usr/share/fonts), depois a do sistema."""
+    nome = "DejaVuSans-Bold.ttf" if negrito else "DejaVuSans.ttf"
+    for cam in (os.path.join(_AQUI, "fontes", nome),
+                os.path.join("/usr/share/fonts/truetype/dejavu", nome)):
+        if os.path.exists(cam):
+            return cam
+    return nome
+
 import numpy as np
 import pymupdf
 from PIL import Image
@@ -14,8 +29,8 @@ PETROL = (35/255, 94/255, 119/255)
 MINT = (127/255, 207/255, 196/255)
 CINZA = (0.42, 0.42, 0.45)
 
-REG = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+REG = fonte_arquivo(False)
+BOLD = fonte_arquivo(True)
 
 # "IMPERMEÁVEL" contem "PERMEÁVEL": o (?<!IM) evita o falso positivo
 DESCOBERTO = r"(?<!IM)PERME[AÁ]VEL|GRAMA|QUINTAL"

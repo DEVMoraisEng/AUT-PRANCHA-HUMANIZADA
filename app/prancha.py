@@ -62,16 +62,21 @@ def resumo(amb):
     return linhas
 
 
-def areas(amb, area_lote=None):
-    """Soma o que esta escrito na planta. area_lote e um dado de matricula:
-    se o usuario nao informar, a linha simplesmente nao aparece."""
+def areas(amb, area_lote=None, area_construida=None, area_quintal=None):
+    """Por padrao soma o que esta escrito na planta. Mas construida, quintal e
+    lote sao numeros de projeto/matricula: se a pessoa informar, vale o que ela
+    informou - a soma dos ambientes nem sempre bate com a area legal."""
     quintal = sum(a["area"] for a in amb if re.search(DESCOBERTO, a["nome"].upper()))
     construida = sum(a["area"] for a in amb) - quintal
+    if area_construida:
+        construida = float(area_construida)
+    if area_quintal:
+        quintal = float(area_quintal)
     saida = {"ÁREA CONSTRUÍDA": construida, "ÁREA DE QUINTAL": quintal}
     if area_lote:
-        saida["ÁREA DO LOTE"] = area_lote
+        saida["ÁREA DO LOTE"] = float(area_lote)
     else:
-        saida["SOMA DOS AMBIENTES"] = construida + quintal
+        saida["SOMA DAS ÁREAS"] = construida + quintal
     return saida
 
 
@@ -110,7 +115,8 @@ def _dir(pg, x_dir, y, txt, fonte, tam, cor):
 
 
 def montar(planta_img, tres_d_pdf, amb, titulo, saida, area_lote=None,
-           timbrado="tb/word/media/image1.jpeg", humanizar_3d=True):
+           timbrado="tb/word/media/image1.jpeg", humanizar_3d=True,
+           area_construida=None, area_quintal=None):
     doc = pymupdf.open()
     pg = doc.new_page(width=595.276, height=841.89)
     W = pg.rect.width
@@ -122,14 +128,17 @@ def montar(planta_img, tres_d_pdf, amb, titulo, saida, area_lote=None,
     topo = 203.0
     RODAPE = 655.0                       # onde a onda do timbrado comeca
 
-    # ---------------- titulo -------------------------------------------------
-    pg.insert_text((ML, topo), titulo.upper(), fontname="DJB", fontsize=17, color=NAVY)
-    pg.draw_line(pymupdf.Point(ML, topo + 9), pymupdf.Point(ML + 46, topo + 9),
-                 color=MINT, width=2.6)
-    pg.insert_text((ML, topo + 23), "PROJETO ARQUITETÔNICO  ·  PLANTA HUMANIZADA",
-                   fontname="DJ", fontsize=7, color=CINZA)
-
-    y = topo + 38
+    # ---------------- titulo (opcional) --------------------------------------
+    # Sem titulo a prancha nao fica com um espaco vazio no topo: o conteudo sobe.
+    if titulo and titulo.strip():
+        pg.insert_text((ML, topo), titulo.upper(), fontname="DJB", fontsize=17, color=NAVY)
+        pg.draw_line(pymupdf.Point(ML, topo + 9), pymupdf.Point(ML + 46, topo + 9),
+                     color=MINT, width=2.6)
+        pg.insert_text((ML, topo + 23), "PROJETO ARQUITETÔNICO  ·  PLANTA HUMANIZADA",
+                       fontname="DJ", fontsize=7, color=CINZA)
+        y = topo + 38
+    else:
+        y = topo - 12
     colL = ML
     largL = 258.0
     colR = ML + largL + 22
@@ -169,7 +178,7 @@ def montar(planta_img, tres_d_pdf, amb, titulo, saida, area_lote=None,
 
     # ---------------- resumo de areas ---------------------------------------
     yq = yd + 8
-    A = areas(amb, area_lote)
+    A = areas(amb, area_lote, area_construida, area_quintal)
     alt = 15.0
     pg.draw_rect(pymupdf.Rect(colR, yq, colR + largR, yq + alt * len(A) + 7),
                  color=None, fill=(0.960, 0.969, 0.973))

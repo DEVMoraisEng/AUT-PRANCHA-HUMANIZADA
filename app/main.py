@@ -48,6 +48,12 @@ def main():
     p.add_argument("--escala", type=float, default=None,
                    help="forca a escala do desenho (ex: 100) quando a deteccao avisar que nao confia")
     p.add_argument("--pagina", type=int, default=0, help="pagina do PDF da planta (0 = primeira)")
+    p.add_argument("--construida", type=float, default=None,
+                   help="area construida em m2 (se nao informar, soma os ambientes cobertos)")
+    p.add_argument("--quintal", type=float, default=None,
+                   help="area de quintal em m2 (se nao informar, soma as areas descobertas)")
+    p.add_argument("--sem-numero", action="store_true",
+                   help="tira a numeracao do rotulo de venda (QUARTO 01 -> QUARTO)")
     p.add_argument("--relatorio", default=None)
     a = p.parse_args()
 
@@ -64,7 +70,8 @@ def main():
         apelidos[k.strip()] = v.strip()
 
     P = pipeline.preparar(a.planta, beta=250.0, pagina=a.pagina,
-                          apelidos=apelidos, escala_fixa=a.escala)
+                          apelidos=apelidos, escala_fixa=a.escala,
+                          sem_numero=a.sem_numero)
     print(f"escala do desenho detectada: 1:{P['escala']:.0f}"
           f"{'' if P['confiavel'] else '  (NAO PADRAO - conferir!)'}")
     print(f"{'AMBIENTE':<28}{'PLANTA':>9}{'RECONSTRUIDO':>14}{'ERRO':>8}")
@@ -75,7 +82,7 @@ def main():
             fora.append(x["nome"])
         print(f"{x['nome']:<28}{x['area']:>9.2f}{x['medido']:>14.2f}{x['erro']:>7.1f}%{flag}")
 
-    de_para = nomes.tabela(P["amb"], apelidos)
+    de_para = nomes.tabela(P["amb"], apelidos, a.sem_numero)
     if de_para:
         print("\nNOME NA PECA DE VENDA (mude com --nome \"DE=PARA\")")
         for de, para in de_para:
@@ -89,7 +96,8 @@ def main():
                              override=override, moveis=a.moveis)
     prancha.montar(img, a.fachada, P["amb"], a.titulo, a.saida,
                    area_lote=a.lote, timbrado=fundo,
-                   humanizar_3d=not a.fachada_crua)
+                   humanizar_3d=not a.fachada_crua,
+                   area_construida=a.construida, area_quintal=a.quintal)
     print(f"\nprancha gravada em {a.saida}")
 
     if a.relatorio:

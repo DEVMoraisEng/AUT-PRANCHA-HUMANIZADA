@@ -44,7 +44,7 @@ def _tapar_vaos(par, px_por_m, vao_max=1.2, tolerancia=2.0):
 
 
 def preparar(pdf="PLANTA.pdf", dpi=DPI, beta=40.0, pagina=0, apelidos=None,
-             escala_fixa=None, _reamostrado=False):
+             escala_fixa=None, sem_numero=False, _reamostrado=False):
     """Le a planta e devolve tudo que o desenho precisa.
 
     A resolucao de trabalho e ajustada a ESCALA do desenho: uma planta 1:100
@@ -85,7 +85,7 @@ def preparar(pdf="PLANTA.pdf", dpi=DPI, beta=40.0, pagina=0, apelidos=None,
         novo = int(round(min(600, max(100, DPI * escala / 50))))
         if abs(novo - dpi) > 10:
             return preparar(pdf, novo, beta, pagina, apelidos, escala_fixa,
-                            _reamostrado=True)
+                            sem_numero, _reamostrado=True)
 
     k = ((dpi / 25.4) * 1000 / escala) ** 2
 
@@ -112,7 +112,7 @@ def preparar(pdf="PLANTA.pdf", dpi=DPI, beta=40.0, pagina=0, apelidos=None,
     for i, a in enumerate(amb, 1):
         a["medido"] = float((seg == i).sum()) / k
         a["erro"] = abs(a["medido"] - a["area"]) / a["area"] * 100
-        a["rotulo"] = nomes.bonito(a["nome"], apelidos)
+        a["rotulo"] = nomes.bonito(a["nome"], apelidos, sem_numero)
     return dict(page=page, amb=amb, img=img, paredes=paredes, par=par,
                 tapa=tapa, lote=lote, interno=interno, seg=seg, k=k,
                 escala=escala, confiavel=confiavel, dpi=dpi, sc=sc,

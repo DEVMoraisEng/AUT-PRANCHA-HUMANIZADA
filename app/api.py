@@ -30,12 +30,12 @@ def _preparar_arquivos(planta_b64, fachada_b64, timbrado_b64=None):
     return cam
 
 
-def ler(planta_b64, pagina=0, escala=None):
+def ler(planta_b64, pagina=0, escala=None, sem_numero=False):
     """Passo 1: le a planta e devolve os ambientes com o acabamento sugerido.
     Nao gera PDF nenhum - e rapido e serve para a pessoa conferir antes."""
     cam = _preparar_arquivos(planta_b64, None)
     P = pipeline.preparar(cam["planta"], beta=250.0, pagina=pagina,
-                          escala_fixa=escala)
+                          escala_fixa=escala, sem_numero=sem_numero)
     ambientes = []
     for a in P["amb"]:
         ambientes.append({
@@ -46,18 +46,26 @@ def ler(planta_b64, pagina=0, escala=None):
             "erro": round(a["erro"], 1),
             "acabamento": humanizar.material_de(a["nome"]),
         })
+    if not ambientes:
+        raise ValueError(
+            "Nao encontrei nenhum ambiente com nome e area nessa planta. "
+            "O arquivo precisa ser o PDF vetorial exportado do Revit, com os "
+            "rotulos de ambiente visiveis - imagem escaneada ou print nao serve.")
+
+    somas = prancha.areas(P["amb"])
     return json.dumps({
         "escala": round(P["escala"]),
         "confiavel": bool(P["confiavel"]),
-        "paginas": 1,
         "ambientes": ambientes,
         "acabamentos": ["ceramica50", "concreto", "grama"],
+        "sugestao_construida": round(somas["ÁREA CONSTRUÍDA"], 2),
+        "sugestao_quintal": round(somas["ÁREA DE QUINTAL"], 2),
     }, ensure_ascii=False)
 
 
 def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, moveis="traco",
           paleta="neutra", pagina=0, escala=None, pisos=None, apelidos=None,
-          timbrado_b64=None):
+          timbrado_b64=None, construida=None, quintal=None, sem_numero=False):
     """Passo 2: monta a prancha e devolve o PDF em base64.
     `pisos` e `apelidos` sao os ajustes que a pessoa fez na tabela."""
     cam = _preparar_arquivos(planta_b64, fachada_b64, timbrado_b64)
@@ -66,12 +74,14 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, moveis="traco",
                                       "Modelo_papel_timbrado__Morais_Engenharia.docx"))
 
     P = pipeline.preparar(cam["planta"], beta=250.0, pagina=pagina,
-                          apelidos=apelidos or {}, escala_fixa=escala)
+                          apelidos=apelidos or {}, escala_fixa=escala,
+                          sem_numero=sem_numero)
     img = humanizar.desenhar(P, dpi_saida=300, reducao=0.62, paleta=paleta,
                              override=pisos or {}, moveis=moveis)
     saida = os.path.join(TMP, "PRANCHA.pdf")
     prancha.montar(img, cam["fachada"], P["amb"], titulo, saida,
-                   area_lote=lote, timbrado=fundo)
+                   area_lote=lote, timbrado=fundo,
+                   area_construida=construida, area_quintal=quintal)
 
     with open(saida, "rb") as f:
         pdf = base64.b64encode(f.read()).decode()
@@ -89,5 +99,6 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, moveis="traco",
         "confiavel": bool(P["confiavel"]),
         "conferencia": conferencia,
         "caracteristicas": prancha.resumo(P["amb"]),
-        "areas": {k: round(v, 2) for k, v in prancha.areas(P["amb"], lote).items()},
+        "areas": {k: round(v, 2) for k, v in
+                  prancha.areas(P["amb"], lote, construida, quintal).items()},
     }, ensure_ascii=False)

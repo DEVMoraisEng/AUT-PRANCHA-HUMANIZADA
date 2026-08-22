@@ -31,6 +31,15 @@ th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--border2)}
 th{color:var(--text3);font-size:11.5px;text-transform:uppercase;letter-spacing:.5px}
 .aviso{border-left:3px solid var(--verde);background:var(--bg2);padding:11px 14px;border-radius:0 8px 8px 0;font-size:13.5px}
 .alerta{border-left-color:#c0392b}
+.destaque{border-left:4px solid var(--verde)}
+.passo{display:flex;gap:14px;align-items:flex-start;margin-top:16px}
+.num{flex:0 0 30px;height:30px;border-radius:50%;background:var(--azul);color:#fff;
+     font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center}
+.obs{color:var(--text3);font-size:13px}
+.btn{display:inline-block;margin-top:8px;background:var(--verde);color:#fff;text-decoration:none;
+     font-weight:600;font-size:13.5px;padding:9px 15px;border-radius:8px}
+.btn:hover{background:var(--verde-esc,#1a6b40)}
+.btn.grande{font-size:15px;padding:12px 22px;margin-top:4px}
 figure{margin-top:12px}
 figure img{width:100%;border:1px solid var(--border2);border-radius:8px;display:block;background:#fff}
 figcaption{color:var(--text3);font-size:12px;margin-top:6px}
@@ -57,18 +66,19 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:18px 0 34px}
     ele avisa em vez de entregar errado calado.</div>
   </div>
 
+  <div class="card destaque">
+    <h2>Gerar uma prancha</h2>
+    <p>Roda dentro do navegador: você solta os dois PDFs, confere a tabela de
+    ambientes e baixa a prancha. <b>Os arquivos não saem do seu computador</b> e
+    não passam por servidor nenhum.</p>
+    <a class="btn grande" href="gerar.html">Abrir o gerador →</a>
+    <div class="aviso">Na primeira vez o navegador baixa o motor de cálculo
+    (uns 40 MB). Depois disso fica salvo e abre na hora.</div>
+  </div>
+
   <div class="card">
-    <h2>Como rodar</h2>
-    <ol>
-      <li>Coloque <code>PLANTA.pdf</code> e <code>3D.pdf</code> na pasta
-          <code>entrada/</code> deste repositório (botão <b>Add file → Upload files</b>).</li>
-      <li>Aba <b>Actions</b> → <b>Gerar prancha</b> → <b>Run workflow</b>.
-          Preencha o título e, se souber, a área do lote.</li>
-      <li>Quando terminar, baixe o artefato <b>prancha</b>: vem o
-          <code>PRANCHA.pdf</code> e o <code>PRANCHA_conferencia.json</code>
-          com a conferência de áreas.</li>
-    </ol>
-    <p>Para rodar no computador, dentro da pasta <code>app/</code>:</p>
+    <h2>Rodar no computador</h2>
+    <p>Alternativa para quem tem Python instalado. Dentro da pasta <code>app/</code>:</p>
 <pre><code>pip install -r requirements.txt
 python main.py --planta ../entrada/PLANTA.pdf --fachada ../entrada/3D.pdf \
                --titulo "CASA 1 E 2" --lote 90.00 --moveis blocos \

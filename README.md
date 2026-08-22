@@ -3,7 +3,10 @@
 Gera a prancha de venda (planta humanizada + fachada 3D + quadro de áreas) no
 papel timbrado da Morais, a partir do PDF vetorial que sai do Revit.
 
-Página da automação: https://devmoraiseng.github.io/AUT-PRANCHA-HUMANIZADA/
+**Gerar:** https://devmoraiseng.github.io/AUT-PRANCHA-HUMANIZADA/gerar.html
+
+A página roda o programa dentro do próprio navegador (Pyodide/WebAssembly).
+Não há servidor: os PDFs não saem do computador de quem gera.
 
 ## Estrutura
 
@@ -13,9 +16,10 @@ Página da automação: https://devmoraiseng.github.io/AUT-PRANCHA-HUMANIZADA/
 | `entrada/` | onde você coloca `PLANTA.pdf` e `3D.pdf` |
 | `exemplos/` | comparativos antes/depois |
 | `.github/workflows/gerar.yml` | roda o programa pelo GitHub, sem instalar nada |
-| `index.html` | página publicada no GitHub Pages |
+| `index.html` | página de apresentação |
+| `gerar.html` + `gerar-worker.js` | o gerador que roda no navegador |
 
-## Rodar pelo GitHub (sem instalar nada)
+## Caminho alternativo: rodar pelo GitHub
 
 1. `entrada/` → **Add file → Upload files** → sobe `PLANTA.pdf` e `3D.pdf`
 2. **Actions → Gerar prancha → Run workflow** → preenche o título

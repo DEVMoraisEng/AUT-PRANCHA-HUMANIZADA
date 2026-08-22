@@ -1,0 +1,245 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gerar prancha · Morais Engenharia</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--azul:#295778;--azul-esc:#1e3f58;--teal:#8FDCD2;--verde:#2a9d5c;--verde-esc:#1a6b40;
+ --bg:#EAF1F3;--bg2:#F5F9FA;--border:#b8d0da;--border2:#d0e4ec;
+ --text:#1a3347;--text3:#5a8099;--branco:#fff;--vermelho:#c0392b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.55}
+.topo{background:var(--azul-esc);color:#fff;padding:22px 20px}
+.wrap{max-width:1000px;margin:0 auto;padding:0 20px}
+.topo h1{font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:800}
+.topo p{color:var(--teal);font-size:13px}
+.voltar{display:inline-block;color:var(--teal);font-size:12px;text-decoration:none;margin-bottom:8px}
+main{padding:22px 0 60px}
+.card{background:var(--branco);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;margin-bottom:16px}
+h2{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:800;color:var(--azul);
+   text-transform:uppercase;letter-spacing:.6px;margin-bottom:12px}
+.dupla{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.dupla{grid-template-columns:1fr}}
+.solta{border:2px dashed var(--border);border-radius:10px;background:var(--bg2);
+  padding:22px 16px;text-align:center;cursor:pointer;transition:.15s}
+.solta:hover,.solta.sobre{border-color:var(--verde);background:#f0faf4}
+.solta.cheio{border-style:solid;border-color:var(--verde);background:#f0faf4}
+.solta b{display:block;font-size:14px}
+.solta span{font-size:12px;color:var(--text3)}
+label{display:block;font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;
+      color:var(--text3);font-weight:600;margin-bottom:4px}
+input,select{width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;
+  font-family:inherit;font-size:14px;color:var(--text);background:#fff}
+input:focus,select:focus{outline:2px solid var(--teal);outline-offset:-1px}
+.campos{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:12px}
+@media(max-width:760px){.campos{grid-template-columns:1fr 1fr}}
+.btn{background:var(--verde);color:#fff;border:0;border-radius:9px;padding:12px 22px;
+  font-family:inherit;font-size:15px;font-weight:700;cursor:pointer}
+.btn:hover{background:var(--verde-esc)}
+.btn:disabled{background:#b9c7cd;cursor:not-allowed}
+.btn.sec{background:var(--azul)}
+.barra{height:7px;background:var(--bg);border-radius:5px;overflow:hidden;margin-top:12px}
+.barra i{display:block;height:100%;background:var(--verde);width:0;transition:width .3s}
+.status{font-size:13px;color:var(--text3);margin-top:7px}
+.status.err{color:var(--vermelho);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border2);vertical-align:middle}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text3)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+td select,td input{padding:5px 7px;font-size:12.5px}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:20px}
+.ok{background:#e6f6ec;color:var(--verde-esc)}
+.at{background:#fdeeec;color:var(--vermelho)}
+.aviso{border-left:3px solid var(--verde);background:var(--bg2);padding:10px 13px;
+  border-radius:0 8px 8px 0;font-size:13px;margin-top:12px}
+.aviso.alerta{border-left-color:var(--vermelho)}
+.esconde{display:none}
+embed{width:100%;height:640px;border:1px solid var(--border2);border-radius:8px;margin-top:12px}
+footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
+</style>
+
+<div class="topo"><div class="wrap">
+  <a class="voltar" href="index.html">← Prancha Humanizada</a>
+  <h1>Gerar prancha</h1>
+  <p>Roda no seu próprio navegador — os PDFs não saem do computador</p>
+</div></div>
+
+<main class="wrap">
+
+  <div class="card">
+    <h2>1 · Os dois PDFs do Revit</h2>
+    <div class="dupla">
+      <div class="solta" id="s-planta">
+        <b id="n-planta">Planta baixa</b>
+        <span>clique ou arraste o PDF aqui</span>
+      </div>
+      <div class="solta" id="s-fachada">
+        <b id="n-fachada">Fachada 3D</b>
+        <span>clique ou arraste o PDF aqui</span>
+      </div>
+    </div>
+    <input type="file" id="f-planta" accept="application/pdf" class="esconde">
+    <input type="file" id="f-fachada" accept="application/pdf" class="esconde">
+    <div class="barra"><i id="barra"></i></div>
+    <div class="status" id="status">Preparando o programa…</div>
+  </div>
+
+  <div class="card">
+    <h2>2 · Dados da casa</h2>
+    <div class="campos">
+      <div><label>Título da prancha</label><input id="titulo" placeholder="CASA 1 E 2"></div>
+      <div><label>Área do lote (m²)</label><input id="lote" inputmode="decimal" placeholder="90,00"></div>
+      <div><label>Mobiliário</label>
+        <select id="moveis">
+          <option value="blocos">Blocos</option>
+          <option value="traco">Traço do projeto</option>
+        </select></div>
+      <div><label>Paleta</label>
+        <select id="paleta">
+          <option value="neutra">Neutra</option>
+          <option value="cor">Cor</option>
+        </select></div>
+    </div>
+    <div class="aviso">A área do lote é dado de matrícula — não está na planta.
+      Deixe vazio se não souber e a linha simplesmente não aparece.</div>
+  </div>
+
+  <div class="card esconde" id="c-ambientes">
+    <h2>3 · Confira os ambientes</h2>
+    <p style="font-size:13.5px">Nome, área e posição saem do próprio arquivo. O que você
+      decide aqui é o <b>acabamento do piso</b> e o <b>nome que vai na peça de venda</b>.</p>
+    <div style="overflow-x:auto;margin-top:10px">
+      <table id="t-amb">
+        <thead><tr>
+          <th>Ambiente (projeto)</th><th>Nome na peça de venda</th>
+          <th class="num">Área</th><th class="num">Conferência</th><th>Acabamento</th>
+        </tr></thead><tbody></tbody>
+      </table>
+    </div>
+    <div id="alerta-escala"></div>
+  </div>
+
+  <div class="card">
+    <button class="btn" id="b-gerar" disabled>Gerar prancha</button>
+    <button class="btn sec esconde" id="b-baixar">Baixar PDF</button>
+  </div>
+
+  <div class="card esconde" id="c-saida">
+    <h2>Resultado</h2>
+    <embed id="visual" type="application/pdf">
+  </div>
+
+</main>
+<footer>Morais Engenharia e Construção · roda 100% no navegador, sem servidor</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const arq = { planta: null, fachada: null };
+let leitura = null, pdfGerado = null, pronto = false;
+
+const w = new Worker("gerar-worker.js");
+w.postMessage({ tipo: "iniciar" });
+
+function status(t, erro) { const s = $("status"); s.textContent = t; s.className = "status" + (erro ? " err" : ""); }
+function barra(p) { $("barra").style.width = (p || 0) + "%"; }
+
+w.onmessage = ({ data: m }) => {
+  if (m.tipo === "andamento") { status(m.texto); barra(m.pct); }
+  else if (m.tipo === "pronto") { pronto = true; status("Pronto. Solte os dois PDFs acima."); barra(100); tentarLer(); }
+  else if (m.tipo === "leitura") { leitura = m.dados; pintarAmbientes(); status("Ambientes lidos. Confira a tabela e clique em Gerar."); barra(100); $("b-gerar").disabled = false; }
+  else if (m.tipo === "gerado") { entregar(m.dados); }
+  else if (m.tipo === "erro") { status("Deu erro: " + m.texto, true); $("b-gerar").disabled = false; }
+};
+
+/* ---------- arquivos ---------- */
+function ligarSolta(qual) {
+  const cx = $("s-" + qual), inp = $("f-" + qual);
+  cx.onclick = () => inp.click();
+  cx.ondragover = e => { e.preventDefault(); cx.classList.add("sobre"); };
+  cx.ondragleave = () => cx.classList.remove("sobre");
+  cx.ondrop = e => { e.preventDefault(); cx.classList.remove("sobre"); receber(qual, e.dataTransfer.files[0]); };
+  inp.onchange = () => receber(qual, inp.files[0]);
+}
+["planta", "fachada"].forEach(ligarSolta);
+
+async function receber(qual, f) {
+  if (!f) return;
+  if (f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)) { status("Só PDF, por favor.", true); return; }
+  const b = new Uint8Array(await f.arrayBuffer());
+  let s = ""; const bloco = 0x8000;
+  for (let i = 0; i < b.length; i += bloco) s += String.fromCharCode.apply(null, b.subarray(i, i + bloco));
+  arq[qual] = btoa(s);
+  $("s-" + qual).classList.add("cheio");
+  $("n-" + qual).textContent = f.name;
+  tentarLer();
+}
+
+function tentarLer() {
+  if (!pronto || !arq.planta) return;
+  status("Lendo os ambientes da planta…"); barra(30);
+  w.postMessage({ tipo: "ler", planta: arq.planta });
+}
+
+/* ---------- tabela de ambientes ---------- */
+function pintarAmbientes() {
+  const tb = $("t-amb").querySelector("tbody"); tb.innerHTML = "";
+  for (const a of leitura.ambientes) {
+    const tr = document.createElement("tr");
+    const ok = a.erro <= 8;
+    tr.innerHTML =
+      `<td>${a.nome}</td>` +
+      `<td><input data-nome="${a.nome}" value="${a.rotulo}"></td>` +
+      `<td class="num">${a.area.toFixed(2).replace(".", ",")} m²</td>` +
+      `<td class="num"><span class="tag ${ok ? "ok" : "at"}">${ok ? "confere" : "erro " + a.erro + "%"}</span></td>` +
+      `<td><select data-piso="${a.nome}">` +
+        leitura.acabamentos.map(x => `<option value="${x}"${x === a.acabamento ? " selected" : ""}>${x}</option>`).join("") +
+      `</select></td>`;
+    tb.appendChild(tr);
+  }
+  $("c-ambientes").classList.remove("esconde");
+  $("alerta-escala").innerHTML = leitura.confiavel
+    ? `<div class="aviso">Escala <b>1:${leitura.escala}</b>, deduzida do desenho e conferida contra as áreas escritas na planta.</div>`
+    : `<div class="aviso alerta">Não consegui confirmar a escala (a planta tem poucos ambientes rotulados). Confira as áreas antes de usar a prancha.</div>`;
+}
+
+function coletar(attr) {
+  const o = {};
+  document.querySelectorAll(`[data-${attr}]`).forEach(el => { o[el.dataset[attr]] = el.value; });
+  return o;
+}
+
+/* ---------- gerar ---------- */
+$("b-gerar").onclick = () => {
+  if (!arq.planta || !arq.fachada) { status("Faltou um dos dois PDFs.", true); return; }
+  $("b-gerar").disabled = true; $("b-baixar").classList.add("esconde");
+  status("Gerando… isso leva de 20 a 60 segundos."); barra(20);
+  const lote = parseFloat(($("lote").value || "").replace(".", "").replace(",", ".")) || null;
+  w.postMessage({
+    tipo: "gerar", planta: arq.planta, fachada: arq.fachada,
+    titulo: $("titulo").value || "CASA", lote,
+    moveis: $("moveis").value, paleta: $("paleta").value,
+    pisos: coletar("piso"), apelidos: coletar("nome"),
+  });
+};
+
+function entregar(d) {
+  const bin = atob(d.pdf), u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  pdfGerado = URL.createObjectURL(new Blob([u8], { type: "application/pdf" }));
+  $("visual").src = pdfGerado;
+  $("c-saida").classList.remove("esconde");
+  $("b-baixar").classList.remove("esconde");
+  $("b-gerar").disabled = false;
+  const fora = d.conferencia.filter(x => x.erro > 8).map(x => x.nome);
+  status(fora.length ? "Prancha pronta. Revise visualmente: " + fora.join(", ")
+                     : "Prancha pronta. Todos os ambientes conferem.", false);
+  barra(100);
+}
+
+$("b-baixar").onclick = () => {
+  const a = document.createElement("a");
+  a.href = pdfGerado;
+  a.download = ($("titulo").value || "PRANCHA").replace(/[^\wÀ-ÿ ]+/g, "").trim() + ".pdf";
+  a.click();
+};
+</script>

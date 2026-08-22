@@ -54,6 +54,8 @@ td select,td input{padding:5px 7px;font-size:12.5px}
   border-radius:0 8px 8px 0;font-size:13px;margin-top:12px}
 .aviso.alerta{border-left-color:var(--vermelho)}
 .esconde{display:none}
+pre{background:var(--azul-esc);color:#ffd9d4;border-radius:8px;padding:12px 14px;
+ overflow-x:auto;font-size:12px}
 embed{width:100%;height:640px;border:1px solid var(--border2);border-radius:8px;margin-top:12px}
 footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
 </style>
@@ -87,8 +89,7 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
   <div class="card">
     <h2>2 · Dados da casa</h2>
     <div class="campos">
-      <div><label>Título da prancha</label><input id="titulo" placeholder="CASA 1 E 2"></div>
-      <div><label>Área do lote (m²)</label><input id="lote" inputmode="decimal" placeholder="90,00"></div>
+      <div><label>Título da prancha</label><input id="titulo" placeholder="deixe vazio para não sair título"></div>
       <div><label>Mobiliário</label>
         <select id="moveis">
           <option value="blocos">Blocos</option>
@@ -99,9 +100,21 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
           <option value="neutra">Neutra</option>
           <option value="cor">Cor</option>
         </select></div>
+      <div><label>Numeração</label>
+        <select id="semnum">
+          <option value="0">QUARTO 01, BANHO 02…</option>
+          <option value="1">Sem número: QUARTO, BANHO</option>
+        </select></div>
     </div>
-    <div class="aviso">A área do lote é dado de matrícula — não está na planta.
-      Deixe vazio se não souber e a linha simplesmente não aparece.</div>
+    <div class="campos" style="margin-top:12px">
+      <div><label>Área construída (m²)</label><input id="construida" inputmode="decimal" placeholder="soma dos ambientes"></div>
+      <div><label>Área de quintal (m²)</label><input id="quintal" inputmode="decimal" placeholder="soma das descobertas"></div>
+      <div><label>Área do lote (m²)</label><input id="lote" inputmode="decimal" placeholder="da matrícula"></div>
+      <div></div>
+    </div>
+    <div class="aviso">Os três campos de área são números de projeto e matrícula.
+      Deixe vazio para usar a soma dos ambientes da planta — quando você digita,
+      vale o que você digitou. A linha do lote só aparece se for preenchida.</div>
   </div>
 
   <div class="card esconde" id="c-ambientes">
@@ -124,6 +137,11 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
     <button class="btn sec esconde" id="b-baixar">Baixar PDF</button>
   </div>
 
+  <div class="card esconde" id="c-detalhe">
+    <h2>Detalhe do erro</h2>
+    <pre style="white-space:pre-wrap"><code id="detalhe"></code></pre>
+  </div>
+
   <div class="card esconde" id="c-saida">
     <h2>Resultado</h2>
     <embed id="visual" type="application/pdf">
@@ -135,20 +153,45 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
 <script>
 const $ = id => document.getElementById(id);
 const arq = { planta: null, fachada: null };
-let leitura = null, pdfGerado = null, pronto = false;
+let leitura = null, pdfGerado = null, pronto = false, motorOk = true;
 
-const w = new Worker("gerar-worker.js");
-w.postMessage({ tipo: "iniciar" });
+let w = null;
+try {
+  w = new Worker("gerar-worker.js");
+  w.onerror = e => {
+    motorOk = false;
+    status("Não consegui carregar o motor (gerar-worker.js). " +
+           (e.message || "verifique se o arquivo foi publicado junto com esta página."), true);
+  };
+  w.postMessage({ tipo: "iniciar" });
+} catch (e) {
+  status("Este navegador não conseguiu abrir o processador em segundo plano: " + e.message, true);
+}
+
+/* Se em 90 s o motor não deu sinal, a pessoa merece saber por quê. */
+setTimeout(() => {
+  if (!pronto) status("O motor está demorando mais que o normal. Se travar aqui, "
+    + "quase sempre é bloqueio de rede ao CDN (jsdelivr/unpkg) na rede da empresa.", true);
+}, 90000);
 
 function status(t, erro) { const s = $("status"); s.textContent = t; s.className = "status" + (erro ? " err" : ""); }
 function barra(p) { $("barra").style.width = (p || 0) + "%"; }
 
 w.onmessage = ({ data: m }) => {
   if (m.tipo === "andamento") { status(m.texto); barra(m.pct); }
-  else if (m.tipo === "pronto") { pronto = true; status("Pronto. Solte os dois PDFs acima."); barra(100); tentarLer(); }
-  else if (m.tipo === "leitura") { leitura = m.dados; pintarAmbientes(); status("Ambientes lidos. Confira a tabela e clique em Gerar."); barra(100); $("b-gerar").disabled = false; }
+  else if (m.tipo === "pronto") { pronto = true; status("Pronto. Solte os dois PDFs acima."); barra(100); liberar(); tentarLer(); }
+  else if (m.tipo === "leitura") {
+    leitura = m.dados; pintarAmbientes();
+    if (!$("construida").value) $("construida").placeholder = fmt(m.dados.sugestao_construida);
+    if (!$("quintal").value) $("quintal").placeholder = fmt(m.dados.sugestao_quintal);
+    status("Ambientes lidos. Confira a tabela e clique em Gerar."); barra(100); liberar();
+  }
   else if (m.tipo === "gerado") { entregar(m.dados); }
-  else if (m.tipo === "erro") { status("Deu erro: " + m.texto, true); $("b-gerar").disabled = false; }
+  else if (m.tipo === "erro") {
+    status(m.texto, true);
+    if (m.detalhe) { $("detalhe").textContent = m.detalhe; $("c-detalhe").classList.remove("esconde"); }
+    liberar();
+  }
 };
 
 /* ---------- arquivos ---------- */
@@ -171,13 +214,17 @@ async function receber(qual, f) {
   arq[qual] = btoa(s);
   $("s-" + qual).classList.add("cheio");
   $("n-" + qual).textContent = f.name;
+  liberar();
   tentarLer();
 }
+
+const fmt = v => (v == null ? "" : v.toFixed(2).replace(".", ","));
+function liberar() { $("b-gerar").disabled = !(pronto && arq.planta && arq.fachada); }
 
 function tentarLer() {
   if (!pronto || !arq.planta) return;
   status("Lendo os ambientes da planta…"); barra(30);
-  w.postMessage({ tipo: "ler", planta: arq.planta });
+  w.postMessage({ tipo: "ler", planta: arq.planta, semNumero: $("semnum").value === "1" });
 }
 
 /* ---------- tabela de ambientes ---------- */
@@ -209,15 +256,20 @@ function coletar(attr) {
 }
 
 /* ---------- gerar ---------- */
+$("semnum").onchange = () => { if (pronto && arq.planta) tentarLer(); };
+
 $("b-gerar").onclick = () => {
   if (!arq.planta || !arq.fachada) { status("Faltou um dos dois PDFs.", true); return; }
+  $("c-detalhe").classList.add("esconde");
   $("b-gerar").disabled = true; $("b-baixar").classList.add("esconde");
   status("Gerando… isso leva de 20 a 60 segundos."); barra(20);
-  const lote = parseFloat(($("lote").value || "").replace(".", "").replace(",", ".")) || null;
+  const num = id => parseFloat(($(id).value || "").replace(/\./g, "").replace(",", ".")) || null;
   w.postMessage({
     tipo: "gerar", planta: arq.planta, fachada: arq.fachada,
-    titulo: $("titulo").value || "CASA", lote,
+    titulo: $("titulo").value.trim(), lote: num("lote"),
+    construida: num("construida"), quintal: num("quintal"),
     moveis: $("moveis").value, paleta: $("paleta").value,
+    semNumero: $("semnum").value === "1",
     pisos: coletar("piso"), apelidos: coletar("nome"),
   });
 };

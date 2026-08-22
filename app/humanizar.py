@@ -151,8 +151,7 @@ def _anotacao(orig):
     return ((mx - mn) > 45) & (np.argmax(orig, axis=2) != 0)
 
 
-def desenhar(P, dpi_saida=300, reducao=0.56, paleta="neutra", override=None,
-             moveis="traco"):
+def desenhar(P, dpi_saida=300, reducao=0.56, paleta="neutra", override=None):
     """P vem de pipeline.preparar(). Devolve PIL.Image da planta humanizada."""
     page = P["page"]
     esc = dpi_saida / P["dpi"]
@@ -204,6 +203,9 @@ def desenhar(P, dpi_saida=300, reducao=0.56, paleta="neutra", override=None,
     saida = np.full((H, W, 3), 255.0, np.float32)
     cache = {}
     for i, a in enumerate(P["amb"], 1):
+        if not a.get("confiavel", True):
+            seg[seg == i] = 0        # reprovado na conferencia: fica o original
+            continue
         mask = seg == i
         if not mask.any():
             continue
@@ -217,7 +219,7 @@ def desenhar(P, dpi_saida=300, reducao=0.56, paleta="neutra", override=None,
     arvore = _quase(orig, (127, 127, 127), 2)
     verde_amb = np.zeros((H, W), bool)
     for i, a in enumerate(P["amb"], 1):
-        if material_de(a["nome"], override) == "grama":
+        if a.get("confiavel", True) and material_de(a["nome"], override) == "grama":
             verde_amb |= (seg == i)
     copa = ndimage.binary_opening(
         arvore & ndimage.binary_dilation(verde_amb, np.ones((5, 5))), np.ones((9, 9)))
@@ -249,8 +251,6 @@ def desenhar(P, dpi_saida=300, reducao=0.56, paleta="neutra", override=None,
         ndimage.binary_erosion(tinta.max(axis=2) > 0.55, np.ones((int(5 * esc) | 1,) * 2)),
         np.ones((int(7 * esc) | 1,) * 2))
     tinta = np.clip(tinta * np.where(cheio, 0.50, 0.90)[:, :, None], 0, 1)
-    if moveis == "blocos":
-        saida = _blocos_de_movel(saida, orig, tinta, interior, px_por_m, esc)
     saida = np.where(interior[:, :, None], saida * (1 - tinta), saida)
 
     # ---------- 4. o que o projeto NAO nomeia fica como esta ------------------

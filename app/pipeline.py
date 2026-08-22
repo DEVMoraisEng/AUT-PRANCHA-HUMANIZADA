@@ -5,6 +5,8 @@ from skimage.morphology import convex_hull_image
 import extract as E, segmentar as S, nomes
 
 DPI = 150
+TOL_CELULA = 0.12      # celula pode diferir 12% da soma dos rotulos
+TOL_AMBIENTE = 8.0     # e cada ambiente 8% da area escrita
 
 
 def _tapar_vaos(par, px_por_m, vao_max=1.2, tolerancia=2.0):
@@ -109,10 +111,36 @@ def preparar(pdf="PLANTA.pdf", dpi=DPI, beta=40.0, pagina=0, apelidos=None,
                       alcance=1.0 * ppm_out * 41)   # ~1 m de tolerancia
     seg = S.limpar(seg, interno)
     orfao = float((interno & (seg == 0)).sum()) / k
+    # ---- conferencia por CELULA -------------------------------------------
+    # Uma celula e um trecho fechado por parede. Se a area da celula bate com a
+    # soma dos ambientes rotulados dentro dela, a divisao entre eles e confiavel.
+    # Se nao bate, tem area de sobra ali (quintal, escada, calcada) e o programa
+    # nao tem como saber onde termina cada ambiente - entao NAO repinta.
+    cel, ncel = ndimage.label(interno)
+    dentro = {}
+    for i, a in enumerate(amb, 1):
+        c = int(cel[int(a["y"] * sc), int(a["x"] * sc)])
+        dentro.setdefault(c, []).append(i)
+    celula_ok = {}
+    for c, idxs in dentro.items():
+        if not c:
+            celula_ok[c] = False
+            continue
+        area_cel = float((cel == c).sum()) / k
+        soma = sum(amb[i - 1]["area"] for i in idxs)
+        celula_ok[c] = soma > 0 and abs(area_cel - soma) / soma <= TOL_CELULA
+
     for i, a in enumerate(amb, 1):
         a["medido"] = float((seg == i).sum()) / k
         a["erro"] = abs(a["medido"] - a["area"]) / a["area"] * 100
         a["rotulo"] = nomes.bonito(a["nome"], apelidos, sem_numero)
+        c = int(cel[int(a["y"] * sc), int(a["x"] * sc)])
+        a["celula_ok"] = bool(celula_ok.get(c, False))
+        a["confiavel"] = bool(a["celula_ok"] and a["erro"] <= TOL_AMBIENTE)
+        a["motivo"] = ("" if a["confiavel"] else
+                       ("o trecho fechado por parede tem area sobrando "
+                        "(quintal/escada/calçada junto)" if not a["celula_ok"]
+                        else "a area reconstruida nao bateu com a da planta"))
     return dict(page=page, amb=amb, img=img, paredes=paredes, par=par,
                 tapa=tapa, lote=lote, interno=interno, seg=seg, k=k,
                 escala=escala, confiavel=confiavel, dpi=dpi, sc=sc,

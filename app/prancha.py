@@ -114,13 +114,32 @@ def _dir(pg, x_dir, y, txt, fonte, tam, cor):
     pg.insert_text((x_dir - w, y), txt, fontname=fonte, fontsize=tam, color=cor)
 
 
+def _fundo_timbrado(pg, timbrado, pecas=None):
+    """Pinta o papel timbrado. Se as pecas (logo e onda) estiverem disponiveis,
+    monta a folha com elas em resolucao cheia; senao cai para a imagem de
+    pagina inteira, que e mais fraca."""
+    W, H = pg.rect.width, pg.rect.height
+    if pecas and "logo" in pecas and "onda" in pecas:
+        from timbrado import POS_LOGO, POS_REGUA_Y, POS_REGUA_X, POS_ONDA_Y
+        pg.draw_rect(pg.rect, color=None, fill=(1, 1, 1))
+        x0, y0, x1, y1 = POS_LOGO
+        pg.insert_image(pymupdf.Rect(x0 * W, y0 * H, x1 * W, y1 * H),
+                        filename=pecas["logo"], keep_proportion=True)
+        pg.draw_line(pymupdf.Point(POS_REGUA_X * W, POS_REGUA_Y * H),
+                     pymupdf.Point(W, POS_REGUA_Y * H), color=NAVY, width=1.1)
+        pg.insert_image(pymupdf.Rect(0, POS_ONDA_Y * H, W, H),
+                        filename=pecas["onda"], keep_proportion=False)
+    else:
+        pg.insert_image(pg.rect, stream=_bytes(Image.open(timbrado), 1414, q=94))
+
+
 def montar(planta_img, tres_d_pdf, amb, titulo, saida, area_lote=None,
            timbrado="tb/word/media/image1.jpeg", humanizar_3d=True,
-           area_construida=None, area_quintal=None):
+           area_construida=None, area_quintal=None, pecas=None):
     doc = pymupdf.open()
     pg = doc.new_page(width=595.276, height=841.89)
     W = pg.rect.width
-    pg.insert_image(pg.rect, stream=_bytes(Image.open(timbrado), 1240, q=88))
+    _fundo_timbrado(pg, timbrado, pecas)
     pg.insert_font(fontname="DJ", fontfile=REG)
     pg.insert_font(fontname="DJB", fontfile=BOLD)
 

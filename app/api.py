@@ -45,6 +45,8 @@ def ler(planta_b64, pagina=0, escala=None, sem_numero=False):
             "medido": round(a["medido"], 2),
             "erro": round(a["erro"], 1),
             "acabamento": humanizar.material_de(a["nome"]),
+            "confiavel": bool(a["confiavel"]),
+            "motivo": a["motivo"],
         })
     if not ambientes:
         raise ValueError(
@@ -63,25 +65,30 @@ def ler(planta_b64, pagina=0, escala=None, sem_numero=False):
     }, ensure_ascii=False)
 
 
-def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, moveis="traco",
-          paleta="neutra", pagina=0, escala=None, pisos=None, apelidos=None,
-          timbrado_b64=None, construida=None, quintal=None, sem_numero=False):
+def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
+          escala=None, pisos=None, apelidos=None, timbrado_b64=None,
+          construida=None, quintal=None, sem_numero=False):
     """Passo 2: monta a prancha e devolve o PDF em base64.
     `pisos` e `apelidos` sao os ajustes que a pessoa fez na tabela."""
     cam = _preparar_arquivos(planta_b64, fachada_b64, timbrado_b64)
-    fundo = timbrado.extrair(cam["timbrado"]) if "timbrado" in cam else \
-        timbrado.extrair(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                      "Modelo_papel_timbrado__Morais_Engenharia.docx"))
+    docx = cam.get("timbrado") or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "Modelo_papel_timbrado__Morais_Engenharia.docx")
+    fundo = timbrado.extrair(docx, os.path.join(TMP, "timbrado_fundo.jpg"))
+    try:
+        pecas = timbrado.pecas(docx, TMP)
+    except Exception:
+        pecas = None
 
     P = pipeline.preparar(cam["planta"], beta=250.0, pagina=pagina,
                           apelidos=apelidos or {}, escala_fixa=escala,
                           sem_numero=sem_numero)
-    img = humanizar.desenhar(P, dpi_saida=300, reducao=0.62, paleta=paleta,
-                             override=pisos or {}, moveis=moveis)
+    img = humanizar.desenhar(P, dpi_saida=300, reducao=0.62,
+                             override=pisos or {})
     saida = os.path.join(TMP, "PRANCHA.pdf")
     prancha.montar(img, cam["fachada"], P["amb"], titulo, saida,
                    area_lote=lote, timbrado=fundo,
-                   area_construida=construida, area_quintal=quintal)
+                   area_construida=construida, area_quintal=quintal, pecas=pecas)
 
     with open(saida, "rb") as f:
         pdf = base64.b64encode(f.read()).decode()
@@ -91,6 +98,7 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, moveis="traco",
         "area": round(a["area"], 2), "medido": round(a["medido"], 2),
         "erro": round(a["erro"], 1),
         "acabamento": humanizar.material_de(a["nome"], pisos or {}),
+        "confiavel": bool(a["confiavel"]), "motivo": a["motivo"],
     } for a in P["amb"]]
 
     return json.dumps({

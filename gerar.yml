@@ -1,0 +1,74 @@
+name: Gerar prancha
+
+# Roda quando VOCÊ mandar (aba Actions > Gerar prancha > Run workflow).
+# Não roda sozinho: cada execução consome PDF que você colocou em entrada/.
+on:
+  workflow_dispatch:
+    inputs:
+      titulo:
+        description: 'Título da prancha (ex: CASA 1 E 2)'
+        required: true
+        default: 'CASA'
+      lote:
+        description: 'Área do lote em m² (dado de matrícula; deixe vazio se não souber)'
+        required: false
+        default: ''
+      moveis:
+        description: 'Mobiliário'
+        required: true
+        default: 'traco'
+        type: choice
+        options: [traco, blocos]
+      escala:
+        description: 'Forçar escala (ex: 100). Vazio = detecta sozinho'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  gerar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependências
+        run: pip install -r app/requirements.txt
+
+      - name: Conferir os arquivos de entrada
+        run: |
+          test -f entrada/PLANTA.pdf || { echo "::error::falta entrada/PLANTA.pdf"; exit 1; }
+          test -f entrada/3D.pdf     || { echo "::error::falta entrada/3D.pdf"; exit 1; }
+
+      - name: Gerar
+        run: |
+          cd app
+          python main.py \
+            --planta   ../entrada/PLANTA.pdf \
+            --fachada  ../entrada/3D.pdf \
+            --timbrado "Modelo_papel_timbrado__Morais_Engenharia.docx" \
+            --titulo   "${{ inputs.titulo }}" \
+            --moveis   "${{ inputs.moveis }}" \
+            ${{ inputs.lote   != '' && format('--lote {0}',   inputs.lote)   || '' }} \
+            ${{ inputs.escala != '' && format('--escala {0}', inputs.escala) || '' }} \
+            --relatorio ../PRANCHA_conferencia.json \
+            --saida     ../PRANCHA.pdf
+        # O programa devolve código 1 quando algum ambiente sai da tolerância.
+        # Isso é aviso, não falha: a prancha foi gerada e deve ser conferida.
+        continue-on-error: true
+
+      - name: Publicar o resultado
+        uses: actions/upload-artifact@v4
+        with:
+          name: prancha
+          path: |
+            PRANCHA.pdf
+            PRANCHA_conferencia.json
+          if-no-files-found: error
+          retention-days: 30

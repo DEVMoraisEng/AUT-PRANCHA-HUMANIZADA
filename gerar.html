@@ -19,7 +19,10 @@ main{padding:22px 0 60px}
 h2{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:800;color:var(--azul);
    text-transform:uppercase;letter-spacing:.6px;margin-bottom:12px}
 .dupla{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-@media(max-width:760px){.dupla{grid-template-columns:1fr}}
+.dupla.tres{grid-template-columns:1fr 1fr 1fr}
+@media(max-width:760px){.dupla,.dupla.tres{grid-template-columns:1fr}}
+.solta small{display:block;font-size:10.5px;color:var(--verde-esc);font-weight:700;
+  text-transform:uppercase;letter-spacing:.4px;margin-top:5px}
 .solta{border:2px dashed var(--border);border-radius:10px;background:var(--bg2);
   padding:22px 16px;text-align:center;cursor:pointer;transition:.15s}
 .solta:hover,.solta.sobre{border-color:var(--verde);background:#f0faf4}
@@ -71,19 +74,31 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
 <main class="wrap">
 
   <div class="card">
-    <h2>1 · Os dois PDFs do Revit</h2>
-    <div class="dupla">
+    <h2>1 · Os arquivos do Revit</h2>
+    <div class="dupla tres">
       <div class="solta" id="s-planta">
         <b id="n-planta">Planta baixa</b>
-        <span>clique ou arraste o PDF aqui</span>
+        <span>clique ou arraste o PDF</span>
+      </div>
+      <div class="solta" id="s-ficha">
+        <b id="n-ficha">Ficha de cores</b>
+        <span>o .json do pyRevit</span>
+        <small id="tag-ficha">recomendado</small>
       </div>
       <div class="solta" id="s-fachada">
         <b id="n-fachada">Fachada 3D</b>
-        <span>clique ou arraste o PDF aqui</span>
+        <span>clique ou arraste o PDF</span>
       </div>
     </div>
     <input type="file" id="f-planta" accept="application/pdf" class="esconde">
+    <input type="file" id="f-ficha" accept="application/json,.json" class="esconde">
     <input type="file" id="f-fachada" accept="application/pdf" class="esconde">
+    <div class="aviso"><b>A ficha de cores muda o jogo.</b> Sem ela o programa
+      <i>deduz</i> onde termina cada cômodo olhando o desenho — e erra em planta
+      com vão aberto. Com ela ele <i>lê</i>: quem pinta cada ambiente é o próprio
+      Revit, pelo botão <b>Morais → Planta Humanizada</b>. A ficha é o
+      <code>.json</code> que sai junto com o PDF. Sem a ficha ainda funciona,
+      só volta a deduzir.</div>
     <div class="barra"><i id="barra"></i></div>
     <div class="status" id="status">Preparando o programa…</div>
   </div>
@@ -112,10 +127,7 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
     <h2>3 · Confira os ambientes</h2>
     <p style="font-size:13.5px">Nome, área e posição saem do próprio arquivo. O que você
       decide aqui é o <b>acabamento do piso</b> e o <b>nome que vai na peça de venda</b>.</p>
-    <div class="aviso"><b>Conferência</b>: o programa reconstrói cada ambiente a partir
-      das paredes e compara com a área escrita na planta. Bateu, ele repinta. Não bateu,
-      ele <b>não repinta aquele ambiente</b> — fica o desenho original ali, e o motivo
-      aparece na linha. É a garantia de que ele nunca pinta piso no lugar errado.</div>
+    <div class="aviso" id="aviso-metodo"></div>
     <div style="overflow-x:auto;margin-top:10px">
       <table id="t-amb">
         <thead><tr>
@@ -147,7 +159,7 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
 
 <script>
 const $ = id => document.getElementById(id);
-const arq = { planta: null, fachada: null };
+const arq = { planta: null, fachada: null, ficha: null };
 let leitura = null, pdfGerado = null, pronto = false, motorOk = true;
 
 let w = null;
@@ -174,7 +186,7 @@ function barra(p) { $("barra").style.width = (p || 0) + "%"; }
 
 w.onmessage = ({ data: m }) => {
   if (m.tipo === "andamento") { status(m.texto); barra(m.pct); }
-  else if (m.tipo === "pronto") { pronto = true; status("Pronto. Solte os dois PDFs acima."); barra(100); liberar(); tentarLer(); }
+  else if (m.tipo === "pronto") { pronto = true; status("Pronto. Solte os arquivos do Revit acima."); barra(100); liberar(); tentarLer(); }
   else if (m.tipo === "leitura") {
     leitura = m.dados; pintarAmbientes();
     if (!$("construida").value) $("construida").placeholder = fmt(m.dados.sugestao_construida);
@@ -198,15 +210,23 @@ function ligarSolta(qual) {
   cx.ondrop = e => { e.preventDefault(); cx.classList.remove("sobre"); receber(qual, e.dataTransfer.files[0]); };
   inp.onchange = () => receber(qual, inp.files[0]);
 }
-["planta", "fachada"].forEach(ligarSolta);
+["planta", "ficha", "fachada"].forEach(ligarSolta);
 
 async function receber(qual, f) {
   if (!f) return;
-  if (f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)) { status("Só PDF, por favor.", true); return; }
-  const b = new Uint8Array(await f.arrayBuffer());
-  let s = ""; const bloco = 0x8000;
-  for (let i = 0; i < b.length; i += bloco) s += String.fromCharCode.apply(null, b.subarray(i, i + bloco));
-  arq[qual] = btoa(s);
+  if (qual === "ficha") {
+    if (!/\.json$/i.test(f.name)) { status("A ficha de cores é o arquivo .json que sai junto com o PDF.", true); return; }
+    const txt = await f.text();
+    try { JSON.parse(txt); } catch (e) { status("Esse .json está corrompido: " + e.message, true); return; }
+    arq.ficha = txt;
+    $("tag-ficha").textContent = "lendo do Revit";
+  } else {
+    if (f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)) { status("Só PDF, por favor.", true); return; }
+    const b = new Uint8Array(await f.arrayBuffer());
+    let s = ""; const bloco = 0x8000;
+    for (let i = 0; i < b.length; i += bloco) s += String.fromCharCode.apply(null, b.subarray(i, i + bloco));
+    arq[qual] = btoa(s);
+  }
   $("s-" + qual).classList.add("cheio");
   $("n-" + qual).textContent = f.name;
   liberar();
@@ -219,7 +239,8 @@ function liberar() { $("b-gerar").disabled = !(pronto && arq.planta && arq.facha
 function tentarLer() {
   if (!pronto || !arq.planta) return;
   status("Lendo os ambientes da planta…"); barra(30);
-  w.postMessage({ tipo: "ler", planta: arq.planta, semNumero: $("semnum").value === "1" });
+  w.postMessage({ tipo: "ler", planta: arq.planta, ficha: arq.ficha,
+                  semNumero: $("semnum").value === "1" });
 }
 
 /* ---------- tabela de ambientes ---------- */
@@ -232,7 +253,7 @@ function pintarAmbientes() {
       `<td>${a.nome}</td>` +
       `<td><input data-nome="${a.nome}" value="${a.rotulo}"></td>` +
       `<td class="num">${a.area.toFixed(2).replace(".", ",")} m²</td>` +
-      `<td><span class="tag ${ok ? "ok" : "at"}">${ok ? "confere · vai ser repintado" : "não repintado"}</span>` +
+      `<td><span class="tag ${ok ? "ok" : "at"}">${ok ? (leitura.via_ficha ? "lido do Revit" : "confere · vai ser repintado") : "não repintado"}</span>` +
         (ok ? "" : `<div class="obs">${a.motivo}</div>`) + `</td>` +
       `<td>` + (ok ? `<select data-piso="${a.nome}">` +
         leitura.acabamentos.map(x => `<option value="${x}"${x === a.acabamento ? " selected" : ""}>${x}</option>`).join("") +
@@ -240,7 +261,21 @@ function pintarAmbientes() {
     tb.appendChild(tr);
   }
   $("c-ambientes").classList.remove("esconde");
-  $("alerta-escala").innerHTML = leitura.confiavel
+  $("aviso-metodo").innerHTML = leitura.via_ficha
+    ? `<b>Leitura direta do Revit.</b> Cada ambiente foi pintado com uma cor
+       própria pelo pyRevit e a ficha diz qual cor é qual. O programa não deduz
+       limite nenhum: ele lê a cor, e o desenho do móvel que fica por cima é
+       recuperado até — no máximo — a área que o próprio projeto declara.
+       Se o PDF e o .json forem de exportações diferentes, o ambiente aparece
+       aqui como <b>não repintado</b> em vez de sair errado.`
+    : `<b>Conferência.</b> Sem a ficha de cores o programa reconstrói cada
+       ambiente a partir das paredes e compara com a área escrita na planta.
+       Bateu, ele repinta. Não bateu, ele <b>não repinta aquele ambiente</b> —
+       fica o desenho original ali, e o motivo aparece na linha. É a garantia
+       de que ele nunca pinta piso no lugar errado.`;
+  $("alerta-escala").innerHTML = leitura.via_ficha
+    ? `<div class="aviso">Escala <b>1:${leitura.escala}</b>, lida da ficha do Revit.</div>`
+    : leitura.confiavel
     ? `<div class="aviso">Escala <b>1:${leitura.escala}</b>, deduzida do desenho e conferida contra as áreas escritas na planta.</div>`
     : `<div class="aviso alerta">Não consegui confirmar a escala (a planta tem poucos ambientes rotulados). Confira as áreas antes de usar a prancha.</div>`;
 }
@@ -255,13 +290,13 @@ function coletar(attr) {
 $("semnum").onchange = () => { if (pronto && arq.planta) tentarLer(); };
 
 $("b-gerar").onclick = () => {
-  if (!arq.planta || !arq.fachada) { status("Faltou um dos dois PDFs.", true); return; }
+  if (!arq.planta || !arq.fachada) { status("Faltam os PDFs da planta e da fachada.", true); return; }
   $("c-detalhe").classList.add("esconde");
   $("b-gerar").disabled = true; $("b-baixar").classList.add("esconde");
   status("Gerando… isso leva de 20 a 60 segundos."); barra(20);
   const num = id => parseFloat(($(id).value || "").replace(/\./g, "").replace(",", ".")) || null;
   w.postMessage({
-    tipo: "gerar", planta: arq.planta, fachada: arq.fachada,
+    tipo: "gerar", planta: arq.planta, fachada: arq.fachada, ficha: arq.ficha,
     titulo: $("titulo").value.trim(), lote: num("lote"),
     construida: num("construida"), quintal: num("quintal"),
     semNumero: $("semnum").value === "1",

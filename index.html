@@ -68,29 +68,49 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:18px 0 34px}
 
   <div class="card destaque">
     <h2>Gerar uma prancha</h2>
-    <p>Roda dentro do navegador: você solta os dois PDFs, confere a tabela de
-    ambientes e baixa a prancha. <b>Os arquivos não saem do seu computador</b> e
-    não passam por servidor nenhum.</p>
+    <p>Roda dentro do navegador: você solta os arquivos do Revit, confere a
+    tabela de ambientes e baixa a prancha. <b>Os arquivos não saem do seu
+    computador</b> e não passam por servidor nenhum.</p>
     <a class="btn grande" href="gerar.html">Abrir o gerador →</a>
     <div class="aviso">Na primeira vez o navegador baixa o motor de cálculo
     (uns 40 MB). Depois disso fica salvo e abre na hora.</div>
   </div>
 
   <div class="card">
+    <h2>Botões do Revit (pyRevit)</h2>
+    <p>Uma aba <b>Morais</b> dentro do Revit, com três botões. Eles exportam a
+    planta com <b>cada ambiente pintado com uma cor própria</b> e um
+    <code>.json</code> dizendo qual cor é qual — mais a fachada 3D com câmera,
+    sol e sombra padronizados.</p>
+    <div class="aviso"><b>É o que tira o palpite do meio do caminho.</b> Com a
+    ficha de cores o gerador <i>lê</i> o limite de cada cômodo em vez de deduzir
+    olhando o desenho. Era da dedução que vinham os erros: escada virando
+    banheiro, grama entrando na casa por um vão de porta. Sem a ficha o gerador
+    continua funcionando — só volta a deduzir.</div>
+    <p style="margin-top:12px"><a class="btn" href="revit/MoraisEng.extension.zip">Baixar a extensão →</a>
+    &nbsp; <a href="revit/COMO_INSTALAR.md">como instalar e usar</a></p>
+    <table style="margin-top:14px">
+      <tr><th>botão</th><th>o que faz</th></tr>
+      <tr><td><b>01 Planta Humanizada</b></td><td>duplica a planta ativa, pinta cada ambiente, exporta PDF + ficha <code>.json</code></td></tr>
+      <tr><td><b>02 Fachada 3D</b></td><td>perspectiva de venda: câmera na diagonal, sol de relevo, sombra de ambiente, enquadramento apertado</td></tr>
+      <tr><td><b>03 Exportar Tudo</b></td><td>os dois seguidos, na mesma pasta — o botão do dia a dia</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
     <h2>Rodar no computador</h2>
     <p>Alternativa para quem tem Python instalado. Dentro da pasta <code>app/</code>:</p>
 <pre><code>pip install -r requirements.txt
-python main.py --planta ../entrada/PLANTA.pdf --fachada ../entrada/3D.pdf \
-               --titulo "CASA 1 E 2" --lote 90.00 --moveis blocos \
-               --saida PRANCHA.pdf</code></pre>
+python main.py --planta ../entrada/PLANTA.pdf --ficha ../entrada/PLANTA.json \
+               --fachada ../entrada/3D.pdf \
+               --titulo "CASA 1 E 2" --lote 90.00 --saida PRANCHA.pdf</code></pre>
   </div>
 
   <div class="card">
     <h2>Opções</h2>
     <table>
       <tr><th>opção</th><th>o que faz</th></tr>
-      <tr><td><code>--moveis blocos</code></td><td>repinta a pegada do móvel do projeto como bloco, com sombra</td></tr>
-      <tr><td><code>--paleta cor</code></td><td>versão mais quente; o padrão é a paleta neutra</td></tr>
+      <tr><td><code>--ficha PLANTA.json</code></td><td>usa a ficha de cores do pyRevit: lê os ambientes em vez de deduzir</td></tr>
       <tr><td><code>--piso "AMBIENTE=concreto"</code></td><td>corrige o acabamento de um ambiente</td></tr>
       <tr><td><code>--nome "DE=PARA"</code></td><td>renomeia o ambiente na peça de venda</td></tr>
       <tr><td><code>--escala 100</code></td><td>força a escala quando a detecção avisar que não confia</td></tr>

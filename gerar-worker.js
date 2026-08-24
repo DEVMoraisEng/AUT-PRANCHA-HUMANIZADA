@@ -12,7 +12,8 @@ const CDNS = [
 ];
 
 const MODULOS = ["extract.py", "segmentar.py", "pipeline.py", "humanizar.py",
-                 "fachada.py", "prancha.py", "timbrado.py", "nomes.py", "api.py"];
+                 "fachada.py", "prancha.py", "timbrado.py", "nomes.py",
+                 "cores.py", "api.py"];
 const BINARIOS = ["fontes/DejaVuSans.ttf", "fontes/DejaVuSans-Bold.ttf",
                   "Modelo_papel_timbrado__Morais_Engenharia.docx"];
 
@@ -73,20 +74,23 @@ onmessage = async (e) => {
     if (!api) return falha("O motor ainda não terminou de carregar.");
 
     if (m.tipo === "ler") {
-      aviso("Lendo os ambientes da planta…", 45);
-      const r = api.ler(m.planta, m.pagina || 0, m.escala || null, !!m.semNumero);
+      aviso(m.ficha ? "Lendo os ambientes pela ficha do Revit…"
+                    : "Deduzindo os ambientes da planta…", 45);
+      const r = api.ler(m.planta, m.pagina || 0, m.escala || null,
+                        !!m.semNumero, m.ficha || null);
       postMessage({ tipo: "leitura", dados: JSON.parse(r) });
       return;
     }
 
     if (m.tipo === "gerar") {
-      aviso("Reconstruindo os ambientes…", 25);
+      aviso(m.ficha ? "Lendo os ambientes pela ficha do Revit…"
+                    : "Reconstruindo os ambientes…", 25);
       const r = api.gerar(
         m.planta, m.fachada, m.titulo, m.lote,
         m.pagina || 0, m.escala || null,
         pyodide.toPy(m.pisos || {}), pyodide.toPy(m.apelidos || {}),
         m.timbrado || null, m.construida || null, m.quintal || null,
-        !!m.semNumero
+        !!m.semNumero, m.ficha || null
       );
       aviso("Montando a prancha…", 92);
       postMessage({ tipo: "gerado", dados: JSON.parse(r) });

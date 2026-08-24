@@ -8,10 +8,23 @@ papel timbrado da Morais, a partir do PDF vetorial que sai do Revit.
 A página roda o programa dentro do próprio navegador (Pyodide/WebAssembly).
 Não há servidor: os PDFs não saem do computador de quem gera.
 
+## O caminho recomendado: exportar pelo Revit
+
+Instale a extensão de `revit/` no pyRevit (`revit/COMO_INSTALAR.md`) e use
+**Morais → Exportar Tudo**. Saem três arquivos: a planta com cada ambiente
+pintado com uma cor própria, a **ficha `.json`** dizendo qual cor é qual, e a
+fachada 3D.
+
+Com a ficha o gerador **lê** o limite de cada cômodo. Sem ela, ele **deduz** a
+partir do desenho — e é da dedução que vinham os erros (escada virando banheiro,
+grama entrando na casa por um vão de porta). Sem a ficha continua funcionando,
+só volta a deduzir.
+
 ## Estrutura
 
 | pasta | o que é |
 |---|---|
+| `revit/` | a extensão pyRevit (os três botões dentro do Revit) |
 | `app/` | o programa (Python) e o modelo de papel timbrado |
 | `entrada/` | onde você coloca `PLANTA.pdf` e `3D.pdf` |
 | `exemplos/` | comparativos antes/depois |
@@ -30,8 +43,9 @@ Não há servidor: os PDFs não saem do computador de quem gera.
 ```bash
 cd app
 pip install -r requirements.txt
-python main.py --planta ../entrada/PLANTA.pdf --fachada ../entrada/3D.pdf \
-               --titulo "CASA 1 E 2" --lote 90.00 --moveis blocos \
+python main.py --planta ../entrada/PLANTA.pdf --ficha ../entrada/PLANTA.json \
+               --fachada ../entrada/3D.pdf \
+               --titulo "CASA 1 E 2" --lote 90.00 \
                --saida PRANCHA.pdf --relatorio conferencia.json
 ```
 

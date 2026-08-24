@@ -227,7 +227,30 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
     for it, rgb, crua in zip(itens, rgbs, cruas):
         if crua.sum() < 40:
             continue
-        m0 = ndimage.binary_fill_holes(_fechar(crua, passos)) & ~par_grosso
+        # o buraco do movel so fecha se estiver TOTALMENTE cercado por cor
+        # do proprio ambiente - e o movel encostado na parede (cama com
+        # cabeceira na parede, por exemplo) nao fecha: o buraco toca o
+        # limite da mancha exatamente onde a parede comeca, sem nenhuma cor
+        # de ambiente entre os dois. Juntar a parede ANTES do preenchimento
+        # resolve isso - mas SO quando ESTE ambiente especifico realmente
+        # tem parede detectada na borda (confere medindo, nao supondo: uma
+        # porta sempre deixa um vao sem parede, e exigir fechamento 100%
+        # (por celula) desligaria o recurso na casa toda por causa de uma
+        # porta so). Sem essa checagem, um ambiente com parede pouco ou nada
+        # detectada (planta com parede interna em linha fina, nao hachura)
+        # vazaria o preenchimento pro vizinho - ja vi acontecer. E so a
+        # parede que encosta NESTE ambiente entra na conta (dilatacao curta
+        # a partir da propria mancha), nunca a rede de parede da casa toda.
+        borda = crua & ~ndimage.binary_erosion(crua, np.ones((3, 3)))
+        alcance = ndimage.binary_dilation(par_grosso, np.ones((3, 3)), iterations=passos + 2)
+        cobertura = (borda & alcance).sum() / max(1, borda.sum())
+        if cobertura > 0.15:
+            vizinhas = par_grosso & ndimage.binary_dilation(
+                crua, np.ones((3, 3)), iterations=passos + 2)
+            fechada = _fechar(crua, passos) | vizinhas
+        else:
+            fechada = _fechar(crua, passos)
+        m0 = ndimage.binary_fill_holes(fechada) & ~par_grosso
         lab, n = ndimage.label(m0)
         if n > 1:                       # fica so com a mancha principal
             tam = np.bincount(lab.ravel())

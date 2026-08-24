@@ -47,10 +47,10 @@ PALETAS = {
 # Tabela de acabamento. Quem nao casa com nenhuma linha vira CONCRETO.
 REGRAS = [
     # "descoberto/descoberta" vence tudo: nao tem revestimento
-    (r"DESCOBERT|CAL[CÇ]ADA|GARAGEM|IMPERME[AÁ]VEL", "concreto"),
+    (r"DESCOBERT|CAL[CÇ]ADA|IMPERME[AÁ]VEL", "concreto"),
     (r"(?<!IM)PERME[AÁ]VEL|GRAMA|QUINTAL", "grama"),
     (r"SU[IÍ]TE|QUARTO|DORM|SALA|ESTAR|JANTAR|COZINHA|COPA|"
-     r"BANHO|WC|LAVABO|SANIT|SERVI[CÇ]O|LAVAND|HALL|CIRCULA", "ceramica50"),
+     r"BANHO|WC|LAVABO|SANIT|SERVI[CÇ]O|LAVAND|HALL|CIRCULA|GARAGEM", "ceramica50"),
 ]
 PADRAO = "concreto"
 
@@ -251,20 +251,50 @@ def desenhar(P, dpi_saida=300, reducao=0.56, paleta="neutra", override=None,
     traco[paredes] = 255                       # hachura vermelha de parede
     traco[_malha_do_revit(orig) & interior] = 255   # malha de piso do Revit
     anot = _anotacao(orig)
+    # o filtro acima pega VERDE/AZUL saturado pra tirar separador de ambiente
+    # e eixo do Revit - mas o antialiasing entre a tinta do PROPRIO ambiente
+    # (quando ela e verde ou azul, o que e metade da paleta) e o traco cinza
+    # do movel por cima produz pixel de mistura que tambem e verde/azul
+    # saturado, e caia nessa rede: apagava o contorno do movel encostado.
+    # Sem isso um dormitorio pintado de verde saia sempre sem cama nenhuma.
+    # A saida e comparar a DIRECAO da cor (matiz) com a cor do ambiente onde
+    # o pixel esta (via seg) - mistura da propria tinta aponta pro mesmo
+    # lugar que ela; anotacao de verdade do Revit, nao.
+    cor_local = np.zeros_like(orig)
+    for i, rgb in enumerate(P.get("cores_ambiente", []), 1):
+        cor_local[seg == i] = rgb
+    num = (orig * cor_local).sum(axis=2)
+    den = np.sqrt((orig ** 2).sum(axis=2)) * np.sqrt((cor_local ** 2).sum(axis=2)) + 1e-6
+    mesma_familia = (num / den) > 0.985
+    anot &= ~mesma_familia
     for rgb in P.get("cores_ambiente", []):
         anot &= ~_quase(orig, rgb, 34)
     traco[ndimage.binary_dilation(anot, np.ones((3, 3)))] = 255
     regioes = [seg == i for i in range(1, len(P["amb"]) + 1)]
     traco[ndimage.binary_dilation(_chapado(orig, regioes), np.ones((3, 3)))] = 255
-    # planta que veio pintada pelo Revit: a cor do ambiente e fundo, nao desenho
+    # planta que veio pintada pelo Revit: a cor do ambiente e fundo, nao
+    # desenho. SEM dilatar aqui: uma linha de movel de 1px inteiramente
+    # cercada pela cor do proprio ambiente (comum - contorno fino por cima
+    # da tinta) sumia inteira, porque a dilatacao fecha 1px de cada lado e
+    # engole a linha toda de uma vez so. Sem a dilatacao ainda limpa toda a
+    # mancha de cor real - so nao avanca mais um pixel pra dentro dela.
     for rgb in P.get("cores_ambiente", []):
-        traco[ndimage.binary_dilation(_quase(orig, rgb, 30), np.ones((3, 3)))] = 255
+        traco[_quase(orig, rgb, 30)] = 255
     traco[copa] = 255
     for w in page.get_text("words"):           # texto antigo
         x0, y0, x1, y1 = [int(v * dpi_saida / 72.0) for v in w[:4]]
         traco[max(0, y0-2):y1+2, max(0, x0-2):x1+2] = 255
 
     tinta = 1.0 - traco / 255.0
+    # o traco do movel/porta pode sair com so 1px no desenho original - ao
+    # encolher pra caber na folha final ele quase some (o redimensionamento
+    # faz media com os vizinhos claros e apaga o pixel escuro isolado).
+    # Engrossa o traco fino ANTES de aplicar a opacidade, pra sobreviver ao
+    # redimensionamento - e o motivo do movel estar saindo invisivel mesmo
+    # quando a leitura das areas está correta.
+    raio_traco = max(1, int(round(0.9 * esc)))
+    ink = ndimage.grey_dilation(tinta.max(axis=2), size=(2 * raio_traco + 1,) * 2)
+    tinta = np.repeat(ink[:, :, None], 3, axis=2)
     # traco fino fica firme; bloco chapado preto entra mais leve
     cheio = ndimage.binary_dilation(
         ndimage.binary_erosion(tinta.max(axis=2) > 0.55, np.ones((int(5 * esc) | 1,) * 2)),
@@ -474,9 +504,13 @@ def etiquetar(img, P, dpi, seg, livre, px_por_m, reducao=0.56, passo=4):
         fn_, fa_ = fn, fa
         larg = max(dr.textlength(t1, font=fn_), dr.textlength(t2, font=fa_))
         if larg > vao_texto * 0.92:
-            k = max(0.55, vao_texto * 0.92 / max(larg, 1))
-            fn_ = _fonte(max(8, int(fn.size * k)), True)
-            fa_ = _fonte(max(7, int(fa.size * k)), False)
+            # o piso do encolhimento subiu de 0.55 pra 0.72: ambiente MUITO
+            # estreito agora gira o texto (ramo "estreito" acima) em vez de
+            # continuar encolhendo - sobrava tamanho tao diferente de
+            # ambiente pra ambiente que a prancha parecia sem padrao nenhum.
+            k = max(0.72, vao_texto * 0.92 / max(larg, 1))
+            fn_ = _fonte(max(10, int(fn.size * k)), True)
+            fa_ = _fonte(max(9, int(fa.size * k)), False)
         linhas = [t1]
         if dr.textlength(t1, font=fn_) > vao_texto * 0.92:
             linhas = _quebrar(t1)
@@ -490,11 +524,13 @@ def etiquetar(img, P, dpi, seg, livre, px_por_m, reducao=0.56, passo=4):
         halo = max(2, int(fn_.size * 0.16))
 
         if estreito:
-            # rotaciona 90°: desenha numa camada a parte (largura = altura do
-            # texto deitado) e cola girada - assim o texto corre ao longo da
-            # tira em vez de estourar a largura dela.
+            # rotaciona 90°: desenha numa camada a parte - LARGURA = largura
+            # natural do texto deitado (senao ele nasce cortado, so cabendo
+            # a metade: foi exatamente o defeito que saiu "HALL" virando
+            # "ALL" e "BANHO" virando "ANHi") - e ALTURA = altura do bloco de
+            # texto. So depois de desenhado deitado e que a camada gira.
             cy = min(max(cy, e_v + cw), d_v - cw)
-            camada = Image.new("RGBA", (int(2 * ch) + 4, int(2 * cw) + 4), (0, 0, 0, 0))
+            camada = Image.new("RGBA", (int(2 * cw) + 4, int(2 * ch) + 4), (0, 0, 0, 0))
             dc = ImageDraw.Draw(camada, "RGBA")
             ty = camada.height / 2 - h / 2
             for t, w in zip(linhas, larguras):

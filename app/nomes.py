@@ -24,11 +24,12 @@ APELIDOS = [
 
 SUFIXO_NUM = re.compile(r"\s*(?:N[º°]\s*)?\d{1,2}\s*$")
 
-# "DESCOBERTA"/"DESCOBERTO(S)" e informacao de PROJETO (area sem cobertura),
-# nao de venda: some do rotulo mostrado na prancha. O "nome" original
-# continua com a palavra - e dele que material_de() e resumo() dependem para
-# saber que ali nao leva piso ceramico.
+# "DESCOBERTA"/"DESCOBERTO(S)" e "PÓS/PARA/POR HABITE-SE" sao informacao de
+# PROJETO, nao de venda: somem do rotulo mostrado na prancha. O "nome"
+# original continua com a palavra - e dele que material_de() e resumo()
+# dependem para saber que ali nao leva piso ceramico.
 DESCOBERTO_ROTULO = re.compile(r"\s*\bDESCOBERT[OA]S?\b", re.IGNORECASE)
+HABITESE_ROTULO = re.compile(r"\s*\b(?:P[OÓ]S|PARA|POR)\s+HABITE[-\s]?SE\b", re.IGNORECASE)
 
 
 def sem_numeracao(nome):
@@ -50,7 +51,8 @@ def bonito(nome, override=None, tirar_numero=False):
             saida = para
             break
     sem_descoberto = " ".join(DESCOBERTO_ROTULO.sub("", saida).split())
-    saida = sem_descoberto or saida
+    sem_habitese = " ".join(HABITESE_ROTULO.sub("", sem_descoberto).split())
+    saida = sem_habitese or sem_descoberto or saida
     return sem_numeracao(saida) if tirar_numero else saida
 
 

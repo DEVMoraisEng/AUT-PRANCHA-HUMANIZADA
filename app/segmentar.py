@@ -96,6 +96,46 @@ def completar(seg, interno, alcance=None):
     return S
 
 
+def crescer_ate_cota(seg, interno, cotas, beta=40.0, alcance=None):
+    """Cresce uma segmentacao QUE JA EXISTE ate a area declarada de cada um.
+
+    Serve para a planta que veio pintada do Revit: a mancha de cor sai furada
+    onde o movel foi desenhado por cima. Aqui a mancha recupera o buraco - e
+    so o buraco, porque ela CONGELA na area que o proprio projeto declara e
+    ainda tem um limite de quanto pode caminhar ('alcance'). Sem os dois
+    freios a mancha atravessa a porta e come o comodo do lado.
+    """
+    dist = ndimage.distance_transform_edt(interno).astype(np.float32)
+    custo = 1.0 + beta / (1.0 + dist)
+    H, W = interno.shape
+    S = seg.copy()
+    n = int(S.max())
+    conta = np.bincount(S.ravel(), minlength=n + 1).astype(np.int64)
+    cheio = np.array([conta[i] >= cotas[i] for i in range(n + 1)], bool)
+
+    falta = interno & (S == 0)
+    if not falta.any():
+        return S
+    fila = []
+    borda = (S > 0) & ndimage.binary_dilation(falta, VIZ_ES)
+    for y, x in zip(*np.nonzero(borda)):
+        heapq.heappush(fila, (0.0, int(y), int(x), int(S[y, x])))
+    while fila:
+        d, y, x, i = heapq.heappop(fila)
+        if cheio[i] or (alcance is not None and d > alcance):
+            continue
+        for dy, dx in VIZ:
+            ny, nx = y + dy, x + dx
+            if 0 <= ny < H and 0 <= nx < W and S[ny, nx] == 0 and interno[ny, nx]:
+                S[ny, nx] = i
+                conta[i] += 1
+                if conta[i] >= cotas[i]:
+                    cheio[i] = True
+                    break
+                heapq.heappush(fila, (d + float(custo[ny, nx]), ny, nx, i))
+    return S
+
+
 def limpar(seg, interno):
     """Tira respingos: cada ambiente fica so com a sua maior mancha continua.
     O que sobra volta para o vizinho mais proximo andando pelo piso."""

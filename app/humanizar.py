@@ -165,6 +165,10 @@ def desenhar(P, dpi_saida=300, reducao=0.56, paleta="neutra", override=None):
                     .resize((W, H), Image.NEAREST)) > 127
     r, g, b = (orig[:, :, i] for i in range(3))
     paredes = (r > 140) & (r - g > 55) & (r - b > 55)
+    # planta pintada pelo Revit: cor de ambiente nao e parede, por mais
+    # avermelhada que seja. Sem isto um ambiente rosa vira barreira.
+    for rgb in P.get("cores_ambiente", []):
+        paredes &= ~_quase(orig, rgb, 60)
     lado = max(3, int(5 * esc) | 1)
     par = ndimage.binary_closing(paredes, np.ones((lado, lado)))
     par = remove_small_holes(par, area_threshold=max(64, int(0.02 * P["k"] * esc * esc)))
@@ -237,9 +241,15 @@ def desenhar(P, dpi_saida=300, reducao=0.56, paleta="neutra", override=None):
     traco = orig.copy()
     traco[paredes] = 255                       # hachura vermelha de parede
     traco[_malha_do_revit(orig) & interior] = 255   # malha de piso do Revit
-    traco[ndimage.binary_dilation(_anotacao(orig), np.ones((3, 3)))] = 255
+    anot = _anotacao(orig)
+    for rgb in P.get("cores_ambiente", []):
+        anot &= ~_quase(orig, rgb, 34)
+    traco[ndimage.binary_dilation(anot, np.ones((3, 3)))] = 255
     regioes = [seg == i for i in range(1, len(P["amb"]) + 1)]
     traco[ndimage.binary_dilation(_chapado(orig, regioes), np.ones((3, 3)))] = 255
+    # planta que veio pintada pelo Revit: a cor do ambiente e fundo, nao desenho
+    for rgb in P.get("cores_ambiente", []):
+        traco[ndimage.binary_dilation(_quase(orig, rgb, 30), np.ones((3, 3)))] = 255
     traco[copa] = 255
     for w in page.get_text("words"):           # texto antigo
         x0, y0, x1, y1 = [int(v * dpi_saida / 72.0) for v in w[:4]]
@@ -387,7 +397,11 @@ def etiquetar(img, P, dpi, seg, livre, px_por_m, reducao=0.56, passo=4):
 
     for idx, a in sorted(enumerate(P["amb"], 1), key=lambda t: -t[1]["area"]):
         nome = a.get("rotulo") or a["nome"].upper()
-        if a["nome"].upper().startswith("AMBIENTE"):
+        # sem nome de venda nao ha o que escrever; e num vao de meio metro o
+        # texto sairia ilegivel - melhor deixar o ambiente limpo.
+        if not nome or nome.upper().startswith("AMBIENTE"):
+            continue
+        if a["area"] and a["area"] < 0.9:
             continue
         t1, t2 = nome, f"{a['area']:.2f}".replace(".", ",") + " m²"
 

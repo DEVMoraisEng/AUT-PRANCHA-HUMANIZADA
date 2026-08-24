@@ -18,7 +18,7 @@ O que ele faz, nesta ordem:
 Nada e inventado: todo texto e todo numero da prancha sai do arquivo de entrada.
 """
 import argparse, sys, json
-import pipeline, humanizar, prancha, timbrado, nomes
+import pipeline, humanizar, prancha, timbrado, nomes, cores
 
 
 def main():
@@ -49,6 +49,10 @@ def main():
                    help="area de quintal em m2 (se nao informar, soma as areas descobertas)")
     p.add_argument("--sem-numero", action="store_true",
                    help="tira a numeracao do rotulo de venda (QUARTO 01 -> QUARTO)")
+    p.add_argument("--ficha", default=None,
+                   help="o .json de cores gravado pelo botao Planta Humanizada do "
+                        "pyRevit. Com ele o programa LE os ambientes (cor por cor) "
+                        "em vez de deduzir os limites pelo desenho")
     p.add_argument("--relatorio", default=None)
     a = p.parse_args()
 
@@ -67,11 +71,16 @@ def main():
         k, _, v = reg.partition("=")
         apelidos[k.strip()] = v.strip()
 
-    P = pipeline.preparar(a.planta, beta=250.0, pagina=a.pagina,
-                          apelidos=apelidos, escala_fixa=a.escala,
-                          sem_numero=a.sem_numero)
-    print(f"escala do desenho detectada: 1:{P['escala']:.0f}"
-          f"{'' if P['confiavel'] else '  (NAO PADRAO - conferir!)'}")
+    if a.ficha:
+        P = cores.preparar(a.planta, a.ficha, pagina=a.pagina,
+                           apelidos=apelidos, sem_numero=a.sem_numero)
+        print(f"ambientes LIDOS da ficha do Revit: {len(P['amb'])} · escala 1:{P['escala']:.0f}")
+    else:
+        P = pipeline.preparar(a.planta, beta=250.0, pagina=a.pagina,
+                              apelidos=apelidos, escala_fixa=a.escala,
+                              sem_numero=a.sem_numero)
+        print(f"escala do desenho DEDUZIDA: 1:{P['escala']:.0f}"
+              f"{'' if P['confiavel'] else '  (NAO PADRAO - conferir!)'}")
     print(f"{'AMBIENTE':<28}{'PLANTA':>9}{'RECONSTRUIDO':>14}{'ERRO':>8}")
     fora = []
     for x in P["amb"]:

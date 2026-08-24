@@ -37,10 +37,35 @@ def _lut():
     return out
 
 
-def humanizar(pdf, dpi=300, dessaturacao=0.75, sombra=0.30, margem=26, luz=0.06):
+def _renderizar(pdf, largura_alvo=2400, dpi_min=150, dpi_max=520):
+    """Rende a pagina na resolucao em que a CASA - nao a folha - fica grande.
+
+    O Revit exporta a perspectiva no meio de uma folha A4: em 300 dpi fixos a
+    casa costuma ocupar um terco da imagem e chega na prancha com menos da
+    metade da resolucao util. Aqui a primeira passada so mede onde a casa
+    esta; a segunda rende so o necessario para ela sair com ~2400 px de
+    largura. Mesma geometria, o dobro de nitidez, sem estourar memoria.
+    """
     doc = pymupdf.open(pdf)
-    pix = doc[0].get_pixmap(dpi=dpi, colorspace=pymupdf.csRGB)
-    img = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3).astype(np.float32)
+    pg = doc[0]
+    pix = pg.get_pixmap(dpi=90, colorspace=pymupdf.csRGB)
+    peq = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)
+    tinta = peq.min(axis=2) <= 246
+    if tinta.any():
+        xs = np.nonzero(tinta.any(axis=0))[0]
+        larg_obj = max(1, int(xs.max() - xs.min() + 1))
+        dpi = 90.0 * largura_alvo / larg_obj
+    else:
+        dpi = 300.0
+    dpi = float(min(dpi_max, max(dpi_min, dpi)))
+    pix = pg.get_pixmap(dpi=int(round(dpi)), colorspace=pymupdf.csRGB)
+    return np.frombuffer(pix.samples, np.uint8).reshape(
+        pix.height, pix.width, 3).astype(np.float32)
+
+
+def humanizar(pdf, dpi=300, dessaturacao=0.75, sombra=0.30, margem=26, luz=0.06):
+    img = _renderizar(pdf)
+    margem = int(margem * img.shape[1] / 2480.0) or 1
 
     # ---- 1. separa o objeto do fundo ---------------------------------------
     claro = img.min(axis=2) > 246

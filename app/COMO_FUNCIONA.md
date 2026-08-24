@@ -14,6 +14,7 @@ pip install pymupdf pillow numpy scipy scikit-image
 ```
 python3 main.py \
   --planta PLANTA.pdf \
+  --ficha PLANTA.json \
   --fachada 3D.pdf \
   --timbrado "Modelo_papel_timbrado__Morais_Engenharia.docx" \
   --titulo "CASA 1 E 2" \
@@ -21,6 +22,22 @@ python3 main.py \
   --saida PRANCHA.pdf \
   --relatorio conferencia.json
 ```
+
+## Dois caminhos para saber onde termina cada cômodo
+
+**Com ficha (`--ficha PLANTA.json`) — recomendado.** A planta sai do Revit pelo
+botão *Morais → Planta Humanizada* (pyRevit) com cada ambiente pintado com uma
+cor própria, e o `.json` diz qual cor é qual. O programa **lê** a cor. Não há
+palpite: o pixel tem a cor do ambiente ou não tem. O único cálculo que sobra é
+recuperar o pedaço que o móvel desenhado por cima escondeu — e mesmo esse tem
+dois freios: não pode passar da área que o próprio Revit declara, e não pode
+caminhar longe. Erro médio medido: **0,7%**.
+
+**Sem ficha.** O programa **deduz** o limite de cada cômodo a partir das paredes
+do desenho (Dijkstra com cota de área). Funciona, mas erra em planta com vão
+aberto — foi de onde vieram escada virando banheiro e grama entrando na casa
+por um vão de porta. Nesse caminho o ambiente que não bate com a área escrita
+**não é repintado**: fica o desenho original, com o motivo no relatório.
 
 ## Como ele garante que não inventa nada
 
@@ -44,9 +61,10 @@ sem avisar.
 
 | arquivo | função |
 |---|---|
+| `cores.py`     | **lê** os ambientes pela ficha de cores do Revit (caminho recomendado) |
 | `extract.py`   | lê rótulos, áreas e coordenadas do PDF |
 | `segmentar.py` | reconstrói a região de cada ambiente (Dijkstra com cota de área) |
-| `pipeline.py`  | junta leitura + escala + segmentação + conferência |
+| `pipeline.py`  | junta leitura + escala + segmentação + conferência (sem ficha) |
 | `humanizar.py` | repinta a planta (pisos, paredes, vegetação, etiquetas) |
 | `fachada.py`   | trata a perspectiva 3D (tons, fundo, sombra de apoio) |
 | `prancha.py`   | monta a folha A4 no timbrado |
@@ -103,9 +121,8 @@ janela. O acabamento troca exatamente na soleira.
 
 ## Aparência
 
-Por padrão a planta sai **neutra**: os ambientes se distinguem pela textura e
-pelo tom, não pela cor. Para a versão mais quente: `--paleta cor`.
-Não há contorno nem sombra em volta dos cômodos — só a parede.
+A planta sai **neutra**: os ambientes se distinguem pela textura e pelo tom,
+não pela cor. Não há contorno nem sombra em volta dos cômodos — só a parede.
 
 O nome e a área ficam **sem tarja**, posicionados no ponto mais folgado de cada
 ambiente (longe de parede, móvel e louça), com um contorno claro leve para
@@ -119,13 +136,9 @@ Para usar o 3D cru: `--fachada-crua`.
 
 ## Mobiliário
 
-Por padrão (`--moveis traco`) o mobiliário aparece como está no projeto.
-
-Com `--moveis blocos`, cada peça que já existe no desenho é repintada como
-bloco: a pegada é preenchida com um tom da própria família de cor dela
-(madeira, estofado, louça, eletro) e ganha sombra no piso. **A pegada, a
-posição e o tamanho continuam sendo os do projeto** — nenhum móvel é inventado
-nem movido.
+O mobiliário aparece **como está no projeto**: o traço original é preservado,
+só entra mais leve para não pesar na folha. Nenhum móvel é inventado, movido
+ou substituído por bloco de biblioteca.
 
 ## Nome na peça de venda
 
@@ -149,5 +162,7 @@ sempre com a mesma quantidade de pixels por metro. Se avisar que não confia
 - Acabamentos e tons: `humanizar.PALETAS`; tabela ambiente→acabamento: `humanizar.REGRAS`
 - Vão máximo tratado como porta/janela: `pipeline._tapar_vaos(vao_max=1.2)`
 - Tratamento do 3D: `fachada.RAMPA`, `fachada.humanizar(sombra=, luz=)`
+- Quanto a mancha de cor pode crescer sob o móvel: `cores.ALCANCE_M`, `cores.MINIMO_LIDO`
+- Botões do Revit: `../revit/MoraisEng.extension/lib/morais_eng/passos.py`
 - Cores da marca: `NAVY`, `PETROL`, `MINT` em `humanizar.py` e `prancha.py`
 - Posição dos blocos na folha: `prancha.montar()`

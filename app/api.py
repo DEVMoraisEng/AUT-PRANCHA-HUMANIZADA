@@ -10,7 +10,7 @@ Roda igual no computador e dentro do navegador (Pyodide).
 """
 import base64, io, json, os
 
-import pipeline, humanizar, prancha, timbrado, nomes
+import pipeline, humanizar, prancha, timbrado, nomes, cores
 
 TMP = "/tmp/prancha"
 
@@ -30,12 +30,21 @@ def _preparar_arquivos(planta_b64, fachada_b64, timbrado_b64=None):
     return cam
 
 
-def ler(planta_b64, pagina=0, escala=None, sem_numero=False):
+def _preparar(caminho, pagina, escala, apelidos, sem_numero, ficha_txt):
+    """Escolhe o caminho: ficha de cores do Revit (exato) ou deducao."""
+    if ficha_txt:
+        return cores.preparar(caminho, ficha_txt, pagina=pagina,
+                              apelidos=apelidos or {}, sem_numero=sem_numero)
+    return pipeline.preparar(caminho, beta=250.0, pagina=pagina,
+                             apelidos=apelidos or {}, escala_fixa=escala,
+                             sem_numero=sem_numero)
+
+
+def ler(planta_b64, pagina=0, escala=None, sem_numero=False, ficha=None):
     """Passo 1: le a planta e devolve os ambientes com o acabamento sugerido.
     Nao gera PDF nenhum - e rapido e serve para a pessoa conferir antes."""
     cam = _preparar_arquivos(planta_b64, None)
-    P = pipeline.preparar(cam["planta"], beta=250.0, pagina=pagina,
-                          escala_fixa=escala, sem_numero=sem_numero)
+    P = _preparar(cam["planta"], pagina, escala, None, sem_numero, ficha)
     ambientes = []
     for a in P["amb"]:
         ambientes.append({
@@ -62,12 +71,13 @@ def ler(planta_b64, pagina=0, escala=None, sem_numero=False):
         "acabamentos": ["ceramica50", "concreto", "grama"],
         "sugestao_construida": round(somas["ÁREA CONSTRUÍDA"], 2),
         "sugestao_quintal": round(somas["ÁREA DE QUINTAL"], 2),
+        "via_ficha": bool(P.get("via_ficha")),
     }, ensure_ascii=False)
 
 
 def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
           escala=None, pisos=None, apelidos=None, timbrado_b64=None,
-          construida=None, quintal=None, sem_numero=False):
+          construida=None, quintal=None, sem_numero=False, ficha=None):
     """Passo 2: monta a prancha e devolve o PDF em base64.
     `pisos` e `apelidos` sao os ajustes que a pessoa fez na tabela."""
     cam = _preparar_arquivos(planta_b64, fachada_b64, timbrado_b64)
@@ -80,9 +90,7 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
     except Exception:
         pecas = None
 
-    P = pipeline.preparar(cam["planta"], beta=250.0, pagina=pagina,
-                          apelidos=apelidos or {}, escala_fixa=escala,
-                          sem_numero=sem_numero)
+    P = _preparar(cam["planta"], pagina, escala, apelidos, sem_numero, ficha)
     img = humanizar.desenhar(P, dpi_saida=300, reducao=0.62,
                              override=pisos or {})
     saida = os.path.join(TMP, "PRANCHA.pdf")
@@ -106,6 +114,7 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
         "escala": round(P["escala"]),
         "confiavel": bool(P["confiavel"]),
         "conferencia": conferencia,
+        "via_ficha": bool(P.get("via_ficha")),
         "caracteristicas": prancha.resumo(P["amb"]),
         "areas": {k: round(v, 2) for k, v in
                   prancha.areas(P["amb"], lote, construida, quintal).items()},

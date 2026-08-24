@@ -194,14 +194,19 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
     celulas, _ = ndimage.label(~par_grosso)
 
     # --------------------------------------------------- 2b. escala de verdade
+    # _px_por_m2 (celula fechada por parede) e a medida sem vies: nao depende
+    # de quanto movel tem em cada comodo. So existe quando a planta tem parede
+    # em hachura vermelha separando os ambientes (ver Guia PyRevit - botao
+    # forca isso desde Maio/2026). Falhando isso, sobra medir na propria
+    # mancha de cor - e ai o movel (desenhado por cima da tinta) pesa: a
+    # mancha CRUA sempre falta um pouco. Por isso usamos ela so como palpite
+    # inicial (decidir o dpi de reamostragem) e refinamos depois com a mancha
+    # JA RECUPERADA (passo 3), que falta bem menos.
     k = _px_por_m2(cruas, celulas, areas)
-    medida = k is not None
-    if not medida:
-        # sem celula fechada (parede interna sem hachura vermelha, por ex.):
-        # mede a escala direto pela mancha de cor de cada ambiente
+    medida_sem_vies = k is not None
+    if not medida_sem_vies:
         k = _px_por_m2_direto(cruas, areas)
-        medida = k is not None
-    if not medida:
+    if k is None:
         k = ((dpi / 25.4) * 1000 / escala_ficha) ** 2
     ppm = float(np.sqrt(k))
 
@@ -213,28 +218,46 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
             return preparar(pdf, ficha, dpi=novo, pagina=pagina,
                             apelidos=apelidos, sem_numero=sem_numero,
                             _reamostrado=True)
-    escala = (dpi / 25.4) * 1000 / ppm
 
     # ------------------------------------------- 3. mancha limpa de cada um
+    # so limpa (fecha vao + tapa buraco de movel) aqui - ainda NAO decide
+    # quem fica com qual pixel, porque isso depende do k final (passo 3b).
     passos = max(1, int(FECHO_M * ppm / 2.0))
-    amb, seg = [], np.zeros(img.shape[:2], np.int32)
-    cores_usadas, cotas = [], [0]
+    brutos = []
     for it, rgb, crua in zip(itens, rgbs, cruas):
-        i = len(amb) + 1
         if crua.sum() < 40:
             continue
-        # o movel e o texto sao desenhados POR CIMA: a mancha sai furada.
-        # fechar + tapar buraco devolve o comodo - e continua sendo leitura,
-        # porque o limite de fora e a cor, nao um palpite.
-        m = ndimage.binary_fill_holes(_fechar(crua, passos)) & ~par_grosso
-        lab, n = ndimage.label(m)
+        m0 = ndimage.binary_fill_holes(_fechar(crua, passos)) & ~par_grosso
+        lab, n = ndimage.label(m0)
         if n > 1:                       # fica so com a mancha principal
             tam = np.bincount(lab.ravel())
             tam[0] = 0
-            m = lab == int(np.argmax(tam))
-        if not m.any():
+            m0 = lab == int(np.argmax(tam))
+        if not m0.any():
             continue
-        m &= seg == 0
+        brutos.append((it, rgb, m0))
+
+    if not brutos:
+        raise ValueError("A ficha nao bateu com nenhuma cor do PDF. Confira se "
+                         "o JSON e o PDF sao da mesma exportacao.")
+
+    # --------------------------------------------- 3b. refinar a escala
+    # a mancha RECUPERADA (fechar+preencher) falta bem menos area que a
+    # crua - fica mais perto do real. So refina quando a medida inicial teve
+    # vies (a por celula fechada ja e exata, nao precisa e nao deve mudar).
+    if not medida_sem_vies:
+        k_fino = _px_por_m2_direto([m for _, _, m in brutos],
+                                   [float(it.get("area") or 0) for it, _, _ in brutos])
+        if k_fino:
+            k = k_fino
+            ppm = float(np.sqrt(k))
+    escala = (dpi / 25.4) * 1000 / ppm
+
+    amb, seg = [], np.zeros(img.shape[:2], np.int32)
+    cores_usadas, cotas = [], [0]
+    for it, rgb, m0 in brutos:
+        i = len(amb) + 1
+        m = m0 & (seg == 0)
         if not m.any():
             continue
         seg[m] = i

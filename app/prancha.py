@@ -81,19 +81,33 @@ def areas(amb, area_lote=None, area_construida=None, area_quintal=None):
 
 
 def _bytes(img, largura_alvo=None, q=90):
-    """Reamostra para a resolucao que a folha realmente usa e grava em JPEG.
-    Sem isso o PDF final fica com dezenas de MB por nada."""
+    """Reamostra para a resolucao que a folha realmente usa e grava a
+    imagem. Imagem com transparencia (RGBA) vai em PNG - JPEG nao tem canal
+    alfa, viraria fundo branco solido de novo. Sem alfa, continua JPEG: sem
+    isso o PDF final fica com dezenas de MB por nada."""
     if largura_alvo and img.width > largura_alvo:
         h = int(img.height * largura_alvo / img.width)
         img = img.resize((largura_alvo, h), Image.LANCZOS)
     b = io.BytesIO()
-    img.convert("RGB").save(b, "JPEG", quality=q, subsampling=0, optimize=True)
+    if img.mode == "RGBA":
+        img.save(b, "PNG", optimize=True)
+    else:
+        img.convert("RGB").save(b, "JPEG", quality=q, subsampling=0, optimize=True)
     return b.getvalue()
 
 
 def recortar(img, margem=18):
-    a = np.array(img.convert("RGB"))
-    nz = np.where(a.min(axis=2) < 248)
+    """Corta a margem em branco ao redor do desenho. Com canal alfa, o corte
+    segue onde tem CONTEUDO (alfa>0) - com RGB puro (sem transparencia),
+    segue onde NAO E branco, como antes."""
+    if img.mode == "RGBA":
+        alfa = np.array(img.getchannel("A"))
+        nz = np.where(alfa > 8)
+    else:
+        a = np.array(img.convert("RGB"))
+        nz = np.where(a.min(axis=2) < 248)
+    if not len(nz[0]):
+        return img
     y0, y1 = nz[0].min(), nz[0].max(); x0, x1 = nz[1].min(), nz[1].max()
     return img.crop((max(0, x0-margem), max(0, y0-margem),
                      min(img.width, x1+margem), min(img.height, y1+margem)))

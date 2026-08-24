@@ -24,6 +24,12 @@ APELIDOS = [
 
 SUFIXO_NUM = re.compile(r"\s*(?:N[º°]\s*)?\d{1,2}\s*$")
 
+# "DESCOBERTA"/"DESCOBERTO(S)" e informacao de PROJETO (area sem cobertura),
+# nao de venda: some do rotulo mostrado na prancha. O "nome" original
+# continua com a palavra - e dele que material_de() e resumo() dependem para
+# saber que ali nao leva piso ceramico.
+DESCOBERTO_ROTULO = re.compile(r"\s*\bDESCOBERT[OA]S?\b", re.IGNORECASE)
+
 
 def sem_numeracao(nome):
     """QUARTO 01 -> QUARTO. Só tira número no FIM do nome, e nunca deixa
@@ -43,6 +49,8 @@ def bonito(nome, override=None, tirar_numero=False):
         if re.match(padrao, n):
             saida = para
             break
+    sem_descoberto = " ".join(DESCOBERTO_ROTULO.sub("", saida).split())
+    saida = sem_descoberto or saida
     return sem_numeracao(saida) if tirar_numero else saida
 
 

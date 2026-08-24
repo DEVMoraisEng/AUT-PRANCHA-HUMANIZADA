@@ -151,8 +151,17 @@ def _anotacao(orig):
     return ((mx - mn) > 45) & (np.argmax(orig, axis=2) != 0)
 
 
-def desenhar(P, dpi_saida=300, reducao=0.56, paleta="neutra", override=None):
-    """P vem de pipeline.preparar(). Devolve PIL.Image da planta humanizada."""
+def desenhar(P, dpi_saida=300, reducao=0.56, paleta="neutra", override=None,
+             fundo_transparente=True):
+    """P vem de pipeline.preparar(). Devolve PIL.Image da planta humanizada.
+
+    fundo_transparente: a margem em branco ao redor do desenho (o resto da
+    folha A4 que o Revit exporta em volta da casa) sai com alfa=0 em vez de
+    branco solido - assim, colada no timbrado, aparece a textura do papel
+    em vez de uma caixa branca. O que E desenho (piso, parede, e qualquer
+    traco que ja existia fora dos ambientes nomeados, tipo calcada ou
+    tracejado de divisa) continua opaco.
+    """
     page = P["page"]
     esc = dpi_saida / P["dpi"]
     px_por_m = float(np.sqrt(P["k"])) * esc
@@ -268,6 +277,7 @@ def desenhar(P, dpi_saida=300, reducao=0.56, paleta="neutra", override=None):
     # area, o programa NAO repinta e NAO apaga. Copia o desenho como veio.
     # E a regra que impede o programa de "sumir" com o que ele nao entendeu.
     fora = ~interior & ~par
+    tinta_fora = np.zeros((H, W), bool)
     if fora.any():
         original = orig.copy()
         original[paredes] = 255                          # a parede vira navy
@@ -276,11 +286,22 @@ def desenhar(P, dpi_saida=300, reducao=0.56, paleta="neutra", override=None):
             x0, y0, x1, y1 = [int(v * dpi_saida / 72.0) for v in w[:4]]
             original[max(0, y0-2):y1+2, max(0, x0-2):x1+2] = 255
         saida[fora] = original[fora]
+        # so o que tem tinta de verdade (calcada, tracejado de divisa,
+        # seta de norte...) conta como "desenho" pra opacidade - o resto do
+        # "fora" e so a margem em branco da folha, sem nada desenhado.
+        tinta_fora = fora & (original.min(axis=2) < 250)
 
     # ---------- 5. paredes ----------------------------------------------------
     saida[par] = NAVY
 
-    img = Image.fromarray(np.clip(saida, 0, 255).astype(np.uint8))
+    if fundo_transparente:
+        conteudo = (interior | par | tinta_fora).astype(np.float32)
+        alfa = ndimage.gaussian_filter(conteudo, sigma=max(0.6, 0.5 * esc))
+        alfa = np.clip(alfa * 255.0, 0, 255).astype(np.uint8)
+        rgba = np.dstack([np.clip(saida, 0, 255).astype(np.uint8), alfa])
+        img = Image.fromarray(rgba, "RGBA")
+    else:
+        img = Image.fromarray(np.clip(saida, 0, 255).astype(np.uint8), "RGB")
     livre = interior & ~par & (tinta.max(axis=2) < 0.35)
     return etiquetar(img, P, dpi_saida, seg, livre, px_por_m, reducao=reducao)
 
@@ -385,6 +406,20 @@ def etiquetar(img, P, dpi, seg, livre, px_por_m, reducao=0.56, passo=4):
     'Mais folgado' = ponto do ambiente mais distante de parede, movel, louca e
     das etiquetas ja colocadas. Assim o texto nao precisa de tarja branca atras:
     ele cai em piso limpo e leva so um leve contorno claro.
+
+    Duas garantias que nao existiam antes, as duas do mesmo defeito: quando a
+    grade reduzida (passo 4px) nao achava vaga - caso comum em ambiente fino e
+    comprido, tipo circulacao ou area permeavel, que pode sumir inteiro numa
+    amostragem de 4 em 4 pixel - o ponto de apoio caia na MEDIA das
+    coordenadas do ambiente. Num formato em L ou numa tira, a media cai fora
+    da propria forma, e o texto nascia por cima do vizinho. Pior: esse mesmo
+    caminho desligava o vao (`vao=1e9`), entao nem a largura do texto era
+    contida - o nome saia do tamanho normal em cima de qualquer coisa.
+    Agora o ponto de apoio, quando a grade falha, vem do proprio recorte do
+    ambiente em resolucao cheia (garantido dentro da forma), e o vao nunca
+    fica "infinito" - sempre mede o espaco real, mesmo no caminho de reserva.
+    Ambiente muito mais alto que largo (tira vertical) escreve o rotulo
+    deitado de lado em vez de espremido horizontalmente.
     """
     dr = ImageDraw.Draw(img, "RGBA")
     s = dpi / 72.0
@@ -403,6 +438,12 @@ def etiquetar(img, P, dpi, seg, livre, px_por_m, reducao=0.56, passo=4):
             continue
         if a["area"] and a["area"] < 0.9:
             continue
+        # reprovado na conferencia = sem piso pintado (ver passo 1 de
+        # desenhar(): seg fica 0 ali). Sem area propria nenhum ponto de apoio
+        # e confiavel - o rotulo cairia em qualquer lugar, inclusive fora do
+        # desenho. Melhor nao escrever do que escrever errado.
+        if not a.get("confiavel", True):
+            continue
         t1, t2 = nome, f"{a['area']:.2f}".replace(".", ",") + " m²"
 
         m = (peq_seg == idx) & ~ocupado
@@ -411,19 +452,33 @@ def etiquetar(img, P, dpi, seg, livre, px_por_m, reducao=0.56, passo=4):
             yy, xx = np.unravel_index(int(np.argmax(d)), d.shape)
             cx, cy = float(xx * passo), float(yy * passo)
             e, d_ = _vao_horizontal(m, yy, xx)
-            vao = (d_ - e + 1) * passo
+            e_v, d_v = _vao_vertical(m, yy, xx)
+            # extremos em unidade de PIXEL CHEIO (a grade e amostrada de
+            # `passo` em `passo`) - deixa os dois caminhos (grade e recorte
+            # cheio, no fallback abaixo) na mesma unidade dali pra frente.
+            e, d_, e_v, d_v = e * passo, d_ * passo, e_v * passo, d_v * passo
+            vao = d_ - e + passo
+            vao_v = d_v - e_v + passo
         else:
-            cx, cy = a["x"] * s, a["y"] * s
-            e, d_, vao = 0, 0, 1e9
+            # grade reduzida nao achou vaga (ambiente fino sumiu na amostra
+            # de 4px): busca o ponto mais distante de parede/movel/limite no
+            # recorte em resolucao CHEIA do proprio ambiente - continua
+            # garantidamente dentro da forma, seja qual for o formato. Ja
+            # devolve tudo em pixel cheio, mesma unidade do caminho acima.
+            cx, cy, e, d_, vao, e_v, d_v, vao_v = _ponto_de_apoio_cheio(
+                seg, livre, idx, a, s)
+
+        estreito = vao < vao_v * 0.62 and vao_v > vao * 1.6
+        vao_texto = vao_v if estreito else vao
 
         fn_, fa_ = fn, fa
         larg = max(dr.textlength(t1, font=fn_), dr.textlength(t2, font=fa_))
-        if larg > vao * 0.92:
-            k = max(0.62, vao * 0.92 / max(larg, 1))
-            fn_ = _fonte(max(9, int(fn.size * k)), True)
-            fa_ = _fonte(max(8, int(fa.size * k)), False)
+        if larg > vao_texto * 0.92:
+            k = max(0.55, vao_texto * 0.92 / max(larg, 1))
+            fn_ = _fonte(max(8, int(fn.size * k)), True)
+            fa_ = _fonte(max(7, int(fa.size * k)), False)
         linhas = [t1]
-        if dr.textlength(t1, font=fn_) > vao * 0.92:
+        if dr.textlength(t1, font=fn_) > vao_texto * 0.92:
             linhas = _quebrar(t1)
         gap = int(fn_.size * 0.22)
         h = fn_.size * len(linhas) + gap * len(linhas) + fa_.size
@@ -431,14 +486,39 @@ def etiquetar(img, P, dpi, seg, livre, px_por_m, reducao=0.56, passo=4):
         w2 = dr.textlength(t2, font=fa_)
         cw = max(larguras + [w2]) / 2 + fn_.size * 0.35
         ch = h / 2 + fn_.size * 0.30
-        if vao < 1e8:
-            cx = min(max(cx, e * passo + cw), d_ * passo - cw)
+
+        halo = max(2, int(fn_.size * 0.16))
+
+        if estreito:
+            # rotaciona 90°: desenha numa camada a parte (largura = altura do
+            # texto deitado) e cola girada - assim o texto corre ao longo da
+            # tira em vez de estourar a largura dela.
+            cy = min(max(cy, e_v + cw), d_v - cw)
+            camada = Image.new("RGBA", (int(2 * ch) + 4, int(2 * cw) + 4), (0, 0, 0, 0))
+            dc = ImageDraw.Draw(camada, "RGBA")
+            ty = camada.height / 2 - h / 2
+            for t, w in zip(linhas, larguras):
+                dc.text((camada.width / 2 - w / 2, ty), t, font=fn_, fill=NAVY,
+                        stroke_width=halo, stroke_fill=(255, 255, 255, 220))
+                ty += fn_.size + gap
+            dc.text((camada.width / 2 - w2 / 2, ty), t2, font=fa_, fill=PETROL,
+                    stroke_width=max(2, int(halo * 0.85)), stroke_fill=(255, 255, 255, 220))
+            girada = camada.rotate(90, expand=True)
+            px0 = int(cx - girada.width / 2)
+            py0 = int(cy - girada.height / 2)
+            img.paste(girada, (px0, py0), girada)
+
+            ry0 = max(0, int((cy - cw) / passo)); ry1 = int((cy + cw) / passo) + 1
+            rx0 = max(0, int((cx - ch) / passo)); rx1 = int((cx + ch) / passo) + 1
+            ocupado[ry0:ry1, rx0:rx1] = True
+            continue
+
+        cx = min(max(cx, e + cw), d_ - cw)
 
         ry0 = max(0, int((cy - ch) / passo)); ry1 = int((cy + ch) / passo) + 1
         rx0 = max(0, int((cx - cw) / passo)); rx1 = int((cx + cw) / passo) + 1
         ocupado[ry0:ry1, rx0:rx1] = True
 
-        halo = max(2, int(fn_.size * 0.16))
         ty = cy - h / 2
         for t, w in zip(linhas, larguras):
             dr.text((cx - w/2, ty), t, font=fn_, fill=NAVY,
@@ -447,6 +527,31 @@ def etiquetar(img, P, dpi, seg, livre, px_por_m, reducao=0.56, passo=4):
         dr.text((cx - w2/2, ty), t2, font=fa_, fill=PETROL,
                 stroke_width=max(2, int(halo * 0.85)), stroke_fill=(255, 255, 255, 220))
     return img
+
+
+def _ponto_de_apoio_cheio(seg, livre, idx, a, s):
+    """Ponto de apoio garantidamente DENTRO do ambiente, usado quando a
+    grade reduzida (amostra de `passo` em `passo` px) nao achou vaga - caso
+    tipico de ambiente fino, onde a amostragem pode saltar por cima da tira
+    inteira. Trabalha na mascara em resolucao cheia, entao sempre acha um
+    ponto valido enquanto o ambiente tiver algum piso livre. Devolve tudo em
+    pixel cheio (mesma unidade do caminho pela grade, ja convertido la).
+    """
+    m_cheio = (seg == idx) & livre
+    if not m_cheio.any():
+        m_cheio = seg == idx
+    if m_cheio.any():
+        d = ndimage.distance_transform_edt(m_cheio)
+        yy, xx = np.unravel_index(int(np.argmax(d)), d.shape)
+        cx, cy = float(xx), float(yy)
+        e, d_ = _vao_horizontal(m_cheio, yy, xx)
+        e_v, d_v = _vao_vertical(m_cheio, yy, xx)
+        return cx, cy, float(e), float(d_), d_ - e + 1, float(e_v), float(d_v), d_v - e_v + 1
+    # ambiente sem nenhum piso livre identificavel (nunca deveria acontecer,
+    # mas nao trava a prancha por isso): cai no centroide, com um vao minimo
+    # em vez de "infinito" - o texto continua contido, so pode sair pequeno.
+    cx, cy = a["x"] * s, a["y"] * s
+    return cx, cy, cx - 40, cx + 40, 80, cy - 40, cy + 40, 80
 
 
 def _vao_horizontal(mask, y, x):
@@ -460,6 +565,19 @@ def _vao_horizontal(mask, y, x):
     while d < n - 1 and linha[d + 1]:
         d += 1
     return e, d
+
+
+def _vao_vertical(mask, y, x):
+    """Extremos livres (cima, baixo) na vertical em torno de (y, x)."""
+    coluna = mask[:, x]
+    c = y
+    while c > 0 and coluna[c - 1]:
+        c -= 1
+    b = y
+    n = len(coluna)
+    while b < n - 1 and coluna[b + 1]:
+        b += 1
+    return c, b
 
 
 def _quebrar(texto):

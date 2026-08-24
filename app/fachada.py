@@ -63,7 +63,8 @@ def _renderizar(pdf, largura_alvo=2400, dpi_min=150, dpi_max=520):
         pix.height, pix.width, 3).astype(np.float32)
 
 
-def humanizar(pdf, dpi=300, dessaturacao=0.75, sombra=0.30, margem=26, luz=0.06):
+def humanizar(pdf, dpi=300, dessaturacao=0.75, sombra=0.30, margem=26, luz=0.06,
+              fundo_transparente=True):
     img = _renderizar(pdf)
     margem = int(margem * img.shape[1] / 2480.0) or 1
 
@@ -75,7 +76,8 @@ def humanizar(pdf, dpi=300, dessaturacao=0.75, sombra=0.30, margem=26, luz=0.06)
     fundo = np.isin(lab, list(borda))
     objeto = ~fundo
     if not objeto.any():
-        return Image.fromarray(img.astype(np.uint8))
+        modo = "RGBA" if fundo_transparente else "RGB"
+        return Image.fromarray(img.astype(np.uint8)).convert(modo)
 
     ys, xs = np.nonzero(objeto)
     baixo = int(margem * 3.2)          # espaco para a sombra de contato aparecer
@@ -93,25 +95,39 @@ def humanizar(pdf, dpi=300, dessaturacao=0.75, sombra=0.30, margem=26, luz=0.06)
     matiz = novo + (img - lum[:, :, None])
     novo = novo * (1 - peso) + matiz * peso
 
-    # ---- 3. fundo em degrade + sombra de contato ---------------------------
+    # ---- 3. sombra de contato -------------------------------------------
     H, W = img.shape[:2]
-    t = np.linspace(0, 1, H, dtype=np.float32)[:, None, None]
-    grad = (np.array(FUNDO_TOPO, np.float32) * (1 - t)
-            + np.array(FUNDO_BASE, np.float32) * t)
-    tela = np.repeat(grad, W, axis=1)
-
     silhueta = ndimage.binary_fill_holes(objeto).astype(np.float32)
     desl = int(0.020 * (ys.max() - ys.min()))
     s = np.roll(silhueta, desl, axis=0)
     s = ndimage.gaussian_filter(s, sigma=0.030 * (ys.max() - ys.min()))
     s = np.clip(s * 1.6, 0, 1) * fundo
-    tela *= (1 - sombra * s)[:, :, None]
 
     # luz de estudio: leve gradiente diagonal, so para o volume nao ficar chapado
     gy = np.linspace(-1, 1, H, dtype=np.float32)[:, None]
     gx = np.linspace(-1, 1, W, dtype=np.float32)[None, :]
     ganho = 1.0 + luz * (-(gy * 0.75 + gx * 0.55) / 1.3)
     novo = novo * ganho[:, :, None]
+
+    if fundo_transparente:
+        # sem degrade nenhum: o volume fica opaco, a sombra de contato vira
+        # uma mancha cinza translucida (alfa = intensidade da sombra), e o
+        # resto e alfa=0 - cola direto no timbrado sem caixa branca por tras.
+        alfa = np.clip(np.where(objeto, 1.0, sombra * s), 0, 1)
+        alfa = ndimage.gaussian_filter(alfa, sigma=1.0)
+        cinza_sombra = np.array([60, 58, 62], np.float32)
+        cor = np.where(objeto[:, :, None], novo, cinza_sombra)
+        saida = cor[y0:y1, x0:x1]
+        alfa = alfa[y0:y1, x0:x1]
+        rgba = np.dstack([np.clip(saida, 0, 255), np.clip(alfa * 255.0, 0, 255)])
+        return Image.fromarray(rgba.astype(np.uint8), "RGBA")
+
+    # ---- caminho antigo: fundo em degrade opaco, para quem preferir -------
+    t = np.linspace(0, 1, H, dtype=np.float32)[:, None, None]
+    grad = (np.array(FUNDO_TOPO, np.float32) * (1 - t)
+            + np.array(FUNDO_BASE, np.float32) * t)
+    tela = np.repeat(grad, W, axis=1)
+    tela *= (1 - sombra * s)[:, :, None]
 
     saida = np.where(objeto[:, :, None], novo, tela)[y0:y1, x0:x1]
     obj = objeto[y0:y1, x0:x1]
@@ -125,4 +141,4 @@ def humanizar(pdf, dpi=300, dessaturacao=0.75, sombra=0.30, margem=26, luz=0.06)
     f = f * f * (3 - 2 * f)
     f = np.where(obj, 1.0, f)[:, :, None]
     saida = 255.0 - (255.0 - saida) * f
-    return Image.fromarray(np.clip(saida, 0, 255).astype(np.uint8))
+    return Image.fromarray(np.clip(saida, 0, 255).astype(np.uint8), "RGB")

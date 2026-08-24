@@ -161,6 +161,12 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
 const $ = id => document.getElementById(id);
 const arq = { planta: null, fachada: null, ficha: null };
 let leitura = null, pdfGerado = null, pronto = false, motorOk = true;
+// trava separada do "tem arquivo": sem ela, uma resposta de leitura que
+// chega atrasada (por exemplo, disparada antes do clique em Gerar) destrava
+// o botão no meio do processamento - ja aconteceu, o worker processa uma
+// mensagem de cada vez mas as RESPOSTAS podem chegar fora de ordem do jeito
+// que a pessoa usa a tela.
+let gerando = false;
 
 let w = null;
 try {
@@ -184,17 +190,47 @@ setTimeout(() => {
 function status(t, erro) { const s = $("status"); s.textContent = t; s.className = "status" + (erro ? " err" : ""); }
 function barra(p) { $("barra").style.width = (p || 0) + "%"; }
 
+/* Progresso "de verdade" so existe em dois pontos: quando o worker avisa
+   (poucos avisos, porque api.gerar() e uma chamada Python unica e travada -
+   o Python nao fala com a pagina no meio) e quando termina. No intervalo
+   entre um aviso e outro a barra ficava parada 20-60s: parecia travada.
+   barraAte(piso, teto) trava o valor real (piso) e deixa a barra rastejar
+   devagar ATE o teto - nunca passa dele, so preenche visualmente a espera
+   ate o proximo aviso real chegar e levantar um novo teto. */
+let relogioBarra = null, pctAtual = 0;
+function pararRelogioBarra() { if (relogioBarra) { clearInterval(relogioBarra); relogioBarra = null; } }
+function barraAte(piso, teto) {
+  pctAtual = Math.max(pctAtual, piso);
+  barra(pctAtual);
+  pararRelogioBarra();
+  if (teto == null || teto <= pctAtual) return;
+  relogioBarra = setInterval(() => {
+    if (pctAtual >= teto) { pararRelogioBarra(); return; }
+    pctAtual = Math.min(teto, pctAtual + 0.6);
+    barra(pctAtual);
+  }, 220);
+}
+
 w.onmessage = ({ data: m }) => {
-  if (m.tipo === "andamento") { status(m.texto); barra(m.pct); }
-  else if (m.tipo === "pronto") { pronto = true; status("Pronto. Solte os arquivos do Revit acima."); barra(100); liberar(); tentarLer(); }
+  if (m.tipo === "andamento") {
+    status(m.texto);
+    // carregamento do motor (iniciar) tem varios avisos proximos - vai
+    // direto no valor. Geracao tem so 2 avisos (25%, 92%) separados por um
+    // vao de 20-60s: esses ganham o rastejar, pra nao parecer travado.
+    if (gerando) barraAte(m.pct, Math.min(88, m.pct + 55));
+    else { pararRelogioBarra(); pctAtual = m.pct; barra(m.pct); }
+  }
+  else if (m.tipo === "pronto") { pronto = true; status("Pronto. Solte os arquivos do Revit acima."); pctAtual = 100; barra(100); liberar(); tentarLer(); }
   else if (m.tipo === "leitura") {
     leitura = m.dados; pintarAmbientes();
     if (!$("construida").value) $("construida").placeholder = fmt(m.dados.sugestao_construida);
     if (!$("quintal").value) $("quintal").placeholder = fmt(m.dados.sugestao_quintal);
-    status("Ambientes lidos. Confira a tabela e clique em Gerar."); barra(100); liberar();
+    if (!gerando) { status("Ambientes lidos. Confira a tabela e clique em Gerar."); pctAtual = 100; barra(100); }
+    liberar();
   }
   else if (m.tipo === "gerado") { entregar(m.dados); }
   else if (m.tipo === "erro") {
+    gerando = false; pararRelogioBarra();
     status(m.texto, true);
     if (m.detalhe) { $("detalhe").textContent = m.detalhe; $("c-detalhe").classList.remove("esconde"); }
     liberar();
@@ -234,10 +270,10 @@ async function receber(qual, f) {
 }
 
 const fmt = v => (v == null ? "" : v.toFixed(2).replace(".", ","));
-function liberar() { $("b-gerar").disabled = !(pronto && arq.planta && arq.fachada); }
+function liberar() { $("b-gerar").disabled = gerando || !(pronto && arq.planta && arq.fachada); }
 
 function tentarLer() {
-  if (!pronto || !arq.planta) return;
+  if (!pronto || !arq.planta || gerando) return;
   status("Lendo os ambientes da planta…"); barra(30);
   w.postMessage({ tipo: "ler", planta: arq.planta, ficha: arq.ficha,
                   semNumero: $("semnum").value === "1" });
@@ -292,8 +328,10 @@ $("semnum").onchange = () => { if (pronto && arq.planta) tentarLer(); };
 $("b-gerar").onclick = () => {
   if (!arq.planta || !arq.fachada) { status("Faltam os PDFs da planta e da fachada.", true); return; }
   $("c-detalhe").classList.add("esconde");
+  gerando = true;
   $("b-gerar").disabled = true; $("b-baixar").classList.add("esconde");
-  status("Gerando… isso leva de 20 a 60 segundos."); barra(20);
+  status("Gerando… isso leva de 20 a 60 segundos.");
+  pctAtual = 0; barraAte(20, 25);
   const num = id => parseFloat(($(id).value || "").replace(/\./g, "").replace(",", ".")) || null;
   w.postMessage({
     tipo: "gerar", planta: arq.planta, fachada: arq.fachada, ficha: arq.ficha,
@@ -305,18 +343,19 @@ $("b-gerar").onclick = () => {
 };
 
 function entregar(d) {
+  gerando = false; pararRelogioBarra();
   const bin = atob(d.pdf), u8 = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
   pdfGerado = URL.createObjectURL(new Blob([u8], { type: "application/pdf" }));
   $("visual").src = pdfGerado;
   $("c-saida").classList.remove("esconde");
   $("b-baixar").classList.remove("esconde");
-  $("b-gerar").disabled = false;
+  liberar();
   const fora = d.conferencia.filter(x => !x.confiavel).map(x => x.nome);
   status(fora.length
     ? `Prancha pronta. ${d.conferencia.length - fora.length} de ${d.conferencia.length} ambientes repintados; sem repintar: ${fora.join(", ")}.`
     : "Prancha pronta. Todos os ambientes conferem e foram repintados.", false);
-  barra(100);
+  pctAtual = 100; barra(100);
 }
 
 $("b-baixar").onclick = () => {

@@ -130,6 +130,33 @@ def _px_por_m2(cruas, celulas, areas):
     return None
 
 
+def _px_por_m2_direto(cruas, areas, area_minima=1.5, folga=0.35):
+    """Mede pixels por m2 direto na mancha crua de cada ambiente, sem
+    depender de parede nenhuma.
+
+    Serve para quando _px_por_m2() falha por falta de celula fechada -
+    caso da planta cuja parede interna nao sai em hachura vermelha (so
+    linha fina cinza), que e o unico sinal que aquela funcao reconhece.
+    Cada ambiente sozinho ja da uma razao pixel/m2; a mediana de varios
+    ambientes e uma medida robusta da escala real do PDF mesmo que
+    algum deles esteja com a mancha comida por movel ou por outro
+    ambiente desenhado por cima (a folga de 35% em torno da mediana
+    deixa esses de fora da conta, em vez de estragar a escala de todos).
+    """
+    pares = [(m.sum(), a) for m, a in zip(cruas, areas)
+             if a >= area_minima and m.any()]
+    if len(pares) < 3:
+        return None
+    razoes = np.array([px / a for px, a in pares], np.float64)
+    med = np.median(razoes)
+    if med <= 0:
+        return None
+    boas = razoes[np.abs(razoes - med) <= folga * med]
+    if len(boas) < 3:
+        return None
+    return float(np.median(boas))
+
+
 def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
              _reamostrado=False):
     """Mesmo formato de saida de pipeline.preparar(), mas sem adivinhar nada."""
@@ -169,6 +196,11 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
     # --------------------------------------------------- 2b. escala de verdade
     k = _px_por_m2(cruas, celulas, areas)
     medida = k is not None
+    if not medida:
+        # sem celula fechada (parede interna sem hachura vermelha, por ex.):
+        # mede a escala direto pela mancha de cor de cada ambiente
+        k = _px_por_m2_direto(cruas, areas)
+        medida = k is not None
     if not medida:
         k = ((dpi / 25.4) * 1000 / escala_ficha) ** 2
     ppm = float(np.sqrt(k))

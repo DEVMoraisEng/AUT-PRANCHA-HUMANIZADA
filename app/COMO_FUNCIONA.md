@@ -65,7 +65,7 @@ sem avisar.
 | `extract.py`   | lê rótulos, áreas e coordenadas do PDF |
 | `segmentar.py` | reconstrói a região de cada ambiente (Dijkstra com cota de área) |
 | `pipeline.py`  | junta leitura + escala + segmentação + conferência (sem ficha) |
-| `humanizar.py` | repinta a planta (pisos, paredes, vegetação, etiquetas) |
+| `humanizar.py` | repinta a planta (pisos, paredes, vegetação, móveis em bloco) e devolve onde cada etiqueta cabe |
 | `fachada.py`   | trata a perspectiva 3D (tons, fundo, sombra de apoio) |
 | `prancha.py`   | monta a folha A4 no timbrado |
 | `timbrado.py`  | extrai a arte de fundo do `.docx` |

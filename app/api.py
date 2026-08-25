@@ -31,7 +31,12 @@ def _preparar_arquivos(planta_b64, fachada_b64, timbrado_b64=None):
 
 
 def _preparar(caminho, pagina, escala, apelidos, sem_numero, ficha_txt):
-    """Escolhe o caminho: ficha de cores do Revit (exato) ou deducao."""
+    """Escolhe o caminho: ficha de cores do Revit (exato) ou deducao.
+
+    'sem_numero' e sempre verdadeiro: a prancha e peca de venda, e ali o
+    ambiente e QUARTO, nao QUARTO 02. O parametro so continua existindo para
+    nao quebrar quem chama a api por fora."""
+    sem_numero = True
     if ficha_txt:
         return cores.preparar(caminho, ficha_txt, pagina=pagina,
                               apelidos=apelidos or {}, sem_numero=sem_numero)
@@ -40,7 +45,7 @@ def _preparar(caminho, pagina, escala, apelidos, sem_numero, ficha_txt):
                              sem_numero=sem_numero)
 
 
-def ler(planta_b64, pagina=0, escala=None, sem_numero=False, ficha=None):
+def ler(planta_b64, pagina=0, escala=None, sem_numero=True, ficha=None):
     """Passo 1: le a planta e devolve os ambientes com o acabamento sugerido.
     Nao gera PDF nenhum - e rapido e serve para a pessoa conferir antes."""
     cam = _preparar_arquivos(planta_b64, None)
@@ -77,7 +82,7 @@ def ler(planta_b64, pagina=0, escala=None, sem_numero=False, ficha=None):
 
 def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
           escala=None, pisos=None, apelidos=None, timbrado_b64=None,
-          construida=None, quintal=None, sem_numero=False, ficha=None):
+          construida=None, quintal=None, sem_numero=True, ficha=None):
     """Passo 2: monta a prancha e devolve o PDF em base64.
     `pisos` e `apelidos` sao os ajustes que a pessoa fez na tabela."""
     cam = _preparar_arquivos(planta_b64, fachada_b64, timbrado_b64)
@@ -91,12 +96,18 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
         pecas = None
 
     P = _preparar(cam["planta"], pagina, escala, apelidos, sem_numero, ficha)
-    img = humanizar.desenhar(P, dpi_saida=300, reducao=0.62,
-                             override=pisos or {})
+    # A saida e rasterizada acima da resolucao de analise: abaixo dela o
+    # desenho ja chegaria reduzido na folha, e reduzir traco fino e o que
+    # produz o efeito de borrado. Como so o recorte do desenho vai para a
+    # alta resolucao, isso cabe na memoria do navegador.
+    dpi_saida = int(min(600, max(420, P["dpi"] * 1.25)))
+    img, etiquetas = humanizar.desenhar(P, dpi_saida=dpi_saida,
+                                        override=pisos or {})
     saida = os.path.join(TMP, "PRANCHA.pdf")
     prancha.montar(img, cam["fachada"], P["amb"], titulo, saida,
                    area_lote=lote, timbrado=fundo,
-                   area_construida=construida, area_quintal=quintal, pecas=pecas)
+                   area_construida=construida, area_quintal=quintal,
+                   pecas=pecas, etiquetas=etiquetas)
 
     with open(saida, "rb") as f:
         pdf = base64.b64encode(f.read()).decode()

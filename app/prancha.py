@@ -27,6 +27,7 @@ import fachada
 NAVY = (44/255, 42/255, 90/255)
 PETROL = (35/255, 94/255, 119/255)
 MINT = (127/255, 207/255, 196/255)
+MINT_ESC = (78/255, 158/255, 150/255)
 CINZA = (0.42, 0.42, 0.45)
 
 REG = fonte_arquivo(False)
@@ -80,37 +81,43 @@ def areas(amb, area_lote=None, area_construida=None, area_quintal=None):
     return saida
 
 
-def _bytes(img, largura_alvo=None, q=90):
-    """Reamostra para a resolucao que a folha realmente usa e grava a
-    imagem. Imagem com transparencia (RGBA) vai em PNG - JPEG nao tem canal
-    alfa, viraria fundo branco solido de novo. Sem alfa, continua JPEG: sem
-    isso o PDF final fica com dezenas de MB por nada."""
+def _bytes(img, largura_alvo=None, q=94, sem_perda=False):
+    """Reamostra para a resolucao que a folha realmente usa e grava a imagem.
+
+    A PLANTA vai SEM PERDA (PNG). O JPEG e feito para foto: em desenho de
+    linha ele espalha um halo cinza em volta de cada traco, e era exatamente
+    isso que deixava a planta com cara de "borrada" na prancha. A perspectiva,
+    que e imagem continua, continua em JPEG de alta qualidade porque ali o
+    JPEG nao aparece e o arquivo fica dez vezes menor.
+    """
     if largura_alvo and img.width > largura_alvo:
-        h = int(img.height * largura_alvo / img.width)
+        h = max(1, int(img.height * largura_alvo / img.width))
         img = img.resize((largura_alvo, h), Image.LANCZOS)
     b = io.BytesIO()
-    if img.mode == "RGBA":
+    if sem_perda or img.mode == "RGBA":
         img.save(b, "PNG", optimize=True)
     else:
         img.convert("RGB").save(b, "JPEG", quality=q, subsampling=0, optimize=True)
     return b.getvalue()
 
 
-def recortar(img, margem=18):
-    """Corta a margem em branco ao redor do desenho. Com canal alfa, o corte
-    segue onde tem CONTEUDO (alfa>0) - com RGB puro (sem transparencia),
-    segue onde NAO E branco, como antes."""
+def _caixa(img, margem=18):
+    """Retangulo do conteudo (sem a margem branca em volta)."""
     if img.mode == "RGBA":
-        alfa = np.array(img.getchannel("A"))
-        nz = np.where(alfa > 8)
+        nz = np.where(np.array(img.getchannel("A")) > 8)
     else:
-        a = np.array(img.convert("RGB"))
-        nz = np.where(a.min(axis=2) < 248)
+        nz = np.where(np.array(img.convert("RGB")).min(axis=2) < 248)
     if not len(nz[0]):
-        return img
-    y0, y1 = nz[0].min(), nz[0].max(); x0, x1 = nz[1].min(), nz[1].max()
-    return img.crop((max(0, x0-margem), max(0, y0-margem),
-                     min(img.width, x1+margem), min(img.height, y1+margem)))
+        return (0, 0, img.width, img.height)
+    y0, y1 = nz[0].min(), nz[0].max()
+    x0, x1 = nz[1].min(), nz[1].max()
+    return (max(0, int(x0 - margem)), max(0, int(y0 - margem)),
+            min(img.width, int(x1 + margem)), min(img.height, int(y1 + margem)))
+
+
+def recortar(img, margem=18):
+    """Corta a margem em branco ao redor do desenho."""
+    return img.crop(_caixa(img, margem))
 
 
 def _cabe(w, h, cx, cy):
@@ -147,9 +154,180 @@ def _fundo_timbrado(pg, timbrado, pecas=None):
         pg.insert_image(pg.rect, stream=_bytes(Image.open(timbrado), 1414, q=94))
 
 
+try:
+    _F_REG = pymupdf.Font(fontfile=REG)
+    _F_BOLD = pymupdf.Font(fontfile=BOLD)
+except Exception:                                   # pragma: no cover
+    _F_REG = _F_BOLD = None
+
+
+def _larg(txt, negrito, tam):
+    f = _F_BOLD if negrito else _F_REG
+    if f is not None:
+        return f.text_length(txt, fontsize=tam)
+    return pymupdf.get_text_length(txt, fontname="hebo" if negrito else "helv",
+                                   fontsize=tam) * 1.06
+
+
+# Tamanhos das etiquetas, em PONTOS da folha. Sao fixos de proposito: era a
+# falta disso que fazia cada comodo sair com um corpo de letra diferente.
+ET_NOME = 6.4
+ET_AREA = 5.3
+ET_NOME_MIN = 5.0
+ET_AREA_MIN = 4.3
+ET_CHAMADA_NOME = 6.2      # etiqueta puxada para fora, com linha de chamada
+ET_CHAMADA_AREA = 5.2
+
+
+def _placa(pg, x0, y0, x1, y1):
+    """Chapa clara sob a etiqueta: garante contraste sem tapar o desenho."""
+    pg.draw_rect(pymupdf.Rect(x0, y0, x1, y1), color=None, fill=(1, 1, 1),
+                 fill_opacity=0.68)
+
+
+def _escrever(pg, cx, topo, nome_linhas, area_txt, tn, ta, placa=True):
+    """Bloco nome + area centrado em cx, comecando em 'topo'. Devolve a altura."""
+    gap = tn * 0.20
+    larguras = [_larg(t, True, tn) for t in nome_linhas]
+    wa = _larg(area_txt, False, ta) if area_txt else 0
+    alt = len(nome_linhas) * (tn + gap) + ta
+    if placa:
+        w = max(larguras + [wa]) / 2 + tn * 0.42
+        _placa(pg, cx - w, topo - tn * 0.20, cx + w, topo + alt + ta * 0.35)
+    y = topo + tn
+    for t, w in zip(nome_linhas, larguras):
+        pg.insert_text((cx - w / 2, y), t, fontname="DJB", fontsize=tn, color=NAVY)
+        y += tn + gap
+    if area_txt:
+        pg.insert_text((cx - wa / 2, y), area_txt, fontname="DJ", fontsize=ta,
+                       color=PETROL)
+    return alt
+
+
+def _cabe_dentro(nome, area_txt, vao):
+    """Maior par de tamanhos que faz a etiqueta caber no vao do comodo.
+    Devolve (linhas, tam_nome, tam_area) ou None se nem no menor corpo cabe."""
+    import humanizar
+    for k in (1.0, 0.92, 0.85, ET_NOME_MIN / ET_NOME):
+        tn, ta = ET_NOME * k, max(ET_AREA_MIN, ET_AREA * k)
+        for linhas in ([nome], humanizar.quebrar(nome)):
+            if max(_larg(t, True, tn) for t in linhas) <= vao * 0.92 \
+               and _larg(area_txt, False, ta) <= vao * 0.92:
+                return linhas, tn, ta
+    return None
+
+
+def _bate(r, ocupados, folga=1.2):
+    x0, y0, x1, y1 = r
+    for a0, b0, a1, b1 in ocupados:
+        if x0 < a1 + folga and a0 < x1 + folga and y0 < b1 + folga and b0 < y1 + folga:
+            return True
+    return False
+
+
+def _chamadas(pg, pendentes, x_esq, x_dir, img_x0, img_x1, y_topo, y_base):
+    """Etiqueta que nao cabe no comodo sai para a margem, com linha de chamada.
+
+    E o que um projetista faz a mao quando o comodo e estreito demais para o
+    nome. O texto vai para o lado com mais espaco livre, sempre no mesmo corpo,
+    e uma linha fina liga o texto ao ponto do ambiente. Nenhum nome fica
+    ilegivel e nenhum nome cai no comodo errado.
+    """
+    import humanizar
+    folga = 5.0
+    # O texto fica FORA do desenho, sempre: a margem da coluna e dele, o
+    # miolo e da planta. Antes o texto entrava na planta quando o nome era
+    # comprido, e tapava justamente o comodo que estava nomeando.
+    espaco = {"e": (img_x0 - folga) - x_esq, "d": x_dir - (img_x1 + folga)}
+    lados = {"e": [], "d": []}
+    for p in pendentes:
+        lado = p["lado"]
+        if espaco[lado] < 34 and espaco["e" if lado == "d" else "d"] >= 34:
+            lado = "e" if lado == "d" else "d"
+        lados[lado].append(p)
+
+    for lado, itens in lados.items():
+        itens.sort(key=lambda p: p["py"])
+        usados = []
+        disp = max(28.0, espaco[lado])
+        for p in itens:
+            tn, ta = ET_CHAMADA_NOME, ET_CHAMADA_AREA
+            linhas = [p["nome"]]
+            larg = _larg(p["nome"], True, tn)
+            if larg > disp:
+                linhas = humanizar.quebrar(p["nome"])
+                larg = max(_larg(t, True, tn) for t in linhas)
+            while larg > disp and tn > 4.6:        # nome unico e comprido
+                tn, ta = tn - 0.4, ta - 0.35
+                larg = max(_larg(t, True, tn) for t in linhas)
+            alt = len(linhas) * (tn + tn * 0.20) + ta
+
+            y = min(max(p["py"] - alt / 2, y_topo), y_base - alt)
+            for a, b in usados:                    # nao empilha em cima da outra
+                if y < b and y + alt > a:
+                    y = b + 2.4
+            y = min(y, y_base - alt)
+            usados.append((y, y + alt))
+
+            if lado == "e":
+                cx = img_x0 - folga - larg / 2
+                fim = cx + larg / 2 + 2.5
+            else:
+                cx = img_x1 + folga + larg / 2
+                fim = cx - larg / 2 - 2.5
+
+            _escrever(pg, cx, y, linhas, p["area_txt"], tn, ta, placa=False)
+            meio = y + alt / 2
+            pg.draw_line(pymupdf.Point(fim, meio), pymupdf.Point(p["px"], p["py"]),
+                         color=MINT_ESC, width=0.45)
+            pg.draw_circle(pymupdf.Point(p["px"], p["py"]), 1.0,
+                           color=None, fill=MINT_ESC)
+
+
+def _etiquetar(pg, etiquetas, caixa, x_esq, x_dir, img_x0, img_x1, y_topo, y_base):
+    """Escreve nome e area de cada ambiente EM TEXTO VETORIAL sobre a planta.
+
+    O texto nunca entra na imagem: gravado no pixel ele seria reamostrado
+    junto com a planta na hora de encaixar na folha, e era dai que vinha o
+    nome borrado. Aqui ele e texto de PDF - fica nitido em qualquer zoom e
+    em qualquer impressora.
+    """
+    x0, y0, k = caixa
+    pendentes, ocupados = [], []
+    for e in etiquetas:
+        px = x0 + e["x"] * k
+        py = y0 + e["y"] * k
+        area_txt = ("%.2f" % e["area"]).replace(".", ",") + " m²" if e["area"] else ""
+        cabe = _cabe_dentro(e["nome"], area_txt or "0", e["vao"] * k)
+        dentro = None
+        if cabe:
+            linhas, tn, ta = cabe
+            alt = len(linhas) * (tn + tn * 0.20) + ta
+            larg = max([_larg(t, True, tn) for t in linhas]
+                       + [_larg(area_txt, False, ta) if area_txt else 0])
+            r = (px - larg / 2 - 1, py - alt / 2 - 1, px + larg / 2 + 1, py + alt / 2 + 1)
+            # so cabe se houver folga em ALTURA tambem, e se nao bater numa
+            # etiqueta ja colocada. Bater era o que fazia HALL e QUARTO
+            # sairem escritos um por cima do outro.
+            if e["raio"] * k * 2 >= alt * 1.05 and not _bate(r, ocupados):
+                dentro = (linhas, tn, ta, alt, r)
+        if dentro:
+            linhas, tn, ta, alt, r = dentro
+            _escrever(pg, px, py - alt / 2, linhas, area_txt, tn, ta)
+            ocupados.append(r)
+        else:
+            meio = (img_x0 + img_x1) / 2
+            pendentes.append({"nome": e["nome"], "area_txt": area_txt,
+                              "px": px, "py": py,
+                              "lado": "e" if px <= meio else "d"})
+    if pendentes:
+        _chamadas(pg, pendentes, x_esq, x_dir, img_x0, img_x1, y_topo, y_base)
+
+
 def montar(planta_img, tres_d_pdf, amb, titulo, saida, area_lote=None,
            timbrado="tb/word/media/image1.jpeg", humanizar_3d=True,
-           area_construida=None, area_quintal=None, pecas=None):
+           area_construida=None, area_quintal=None, pecas=None,
+           etiquetas=None):
     doc = pymupdf.open()
     pg = doc.new_page(width=595.276, height=841.89)
     W = pg.rect.width
@@ -178,13 +356,25 @@ def montar(planta_img, tres_d_pdf, amb, titulo, saida, area_lote=None,
     largR = W - MR - colR
 
     # ---------------- planta humanizada -------------------------------------
-    pl = recortar(planta_img)
-    pw, ph = _cabe(pl.width, pl.height, largL, RODAPE - (y + 13))
+    corte = _caixa(planta_img)
+    pl = planta_img.crop(corte)
+    y_planta = y + 13
+    alt_disp = RODAPE - y_planta
+    pw, ph = _cabe(pl.width, pl.height, largL, alt_disp)
     cx = colL + (largL - pw) / 2
     pg.insert_text((colL, y + 5), "PLANTA BAIXA HUMANIZADA", fontname="DJB",
                    fontsize=7.6, color=PETROL)
-    pg.insert_image(pymupdf.Rect(cx, y + 13, cx + pw, y + 13 + ph),
-                    stream=_bytes(pl, int(pw / 72 * 400)))
+    # 800 dpi efetivos e PNG sem perda: a planta e desenho de linha e ocupa
+    # uma faixa estreita da folha, entao isso custa pouco no arquivo final.
+    pg.insert_image(pymupdf.Rect(cx, y_planta, cx + pw, y_planta + ph),
+                    stream=_bytes(pl, int(pw / 72 * 800), sem_perda=True))
+
+    if etiquetas:
+        k = pw / pl.width
+        _etiquetar(pg, [dict(e, x=e["x"] - corte[0], y=e["y"] - corte[1])
+                        for e in etiquetas],
+                   (cx, y_planta, k), colL, colL + largL,
+                   cx, cx + pw, y_planta, y_planta + ph)
 
     # ---------------- fachada 3D --------------------------------------------
     if humanizar_3d:
@@ -197,7 +387,7 @@ def montar(planta_img, tres_d_pdf, amb, titulo, saida, area_lote=None,
     pg.insert_text((colR, y + 5), "PERSPECTIVA / FACHADA", fontname="DJB",
                    fontsize=7.6, color=PETROL)
     pg.insert_image(pymupdf.Rect(tx, y + 13, tx + tw, y + 13 + th),
-                    stream=_bytes(im3, int(tw / 72 * 400)))
+                    stream=_bytes(im3, int(tw / 72 * 450), q=95))
 
     # ---------------- caracteristicas ---------------------------------------
     yd = y + 13 + th + 18
@@ -246,5 +436,7 @@ def montar(planta_img, tres_d_pdf, amb, titulo, saida, area_lote=None,
         _dir(pg, x + cw - 8, ly, f"{a['area']:.2f}".replace(".", ",") + " m²",
              "DJ", 5.5, PETROL)
 
-    doc.save(saida)
+    # sem isto o PNG da planta fica gravado sem compressao e a prancha sai com
+    # 11 MB em vez de 1,4 MB - mesmo desenho, mesma resolucao.
+    doc.save(saida, garbage=4, deflate=True, clean=True)
     return saida

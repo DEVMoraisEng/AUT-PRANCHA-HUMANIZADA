@@ -47,8 +47,10 @@ def main():
                    help="area construida em m2 (se nao informar, soma os ambientes cobertos)")
     p.add_argument("--quintal", type=float, default=None,
                    help="area de quintal em m2 (se nao informar, soma as areas descobertas)")
-    p.add_argument("--sem-numero", action="store_true",
-                   help="tira a numeracao do rotulo de venda (QUARTO 01 -> QUARTO)")
+    # A prancha e peca de venda: ali o ambiente e QUARTO, nunca QUARTO 02.
+    # Deixou de ser opcao. A flag continua aceita para nao quebrar script antigo.
+    p.add_argument("--sem-numero", action="store_true", default=True,
+                   help=argparse.SUPPRESS)
     p.add_argument("--ficha", default=None,
                    help="o .json de cores gravado pelo botao Planta Humanizada do "
                         "pyRevit. Com ele o programa LE os ambientes (cor por cor) "
@@ -99,12 +101,13 @@ def main():
     for nome, mat in humanizar.tabela_acabamentos(P["amb"], override):
         print(f"  {nome:<28}{mat}")
 
-    img = humanizar.desenhar(P, dpi_saida=300, reducao=0.62, override=override)
+    dpi_saida = int(min(600, max(420, P["dpi"] * 1.25)))
+    img, etiquetas = humanizar.desenhar(P, dpi_saida=dpi_saida, override=override)
     prancha.montar(img, a.fachada, P["amb"], a.titulo, a.saida,
                    area_lote=a.lote, timbrado=fundo,
                    humanizar_3d=not a.fachada_crua,
                    area_construida=a.construida, area_quintal=a.quintal,
-                   pecas=pecas)
+                   pecas=pecas, etiquetas=etiquetas)
     print(f"\nprancha gravada em {a.saida}")
 
     if a.relatorio:

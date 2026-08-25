@@ -118,16 +118,49 @@ def _fechar(m, passos):
     return ndimage.binary_closing(m, np.ones((3, 3)), iterations=int(passos))
 
 
-def _mancha(crua, passos, par_grosso):
-    """Mancha fechada de um ambiente: fecha vaos, tapa buracos, fica com a
-    maior parte continua."""
-    m = ndimage.binary_fill_holes(_fechar(crua, passos)) & ~par_grosso
+def _so_a_maior(m):
     lab, n = ndimage.label(m)
-    if n > 1:
-        t = np.bincount(lab.ravel())
-        t[0] = 0
-        m = lab == int(np.argmax(t))
-    return m
+    if n <= 1:
+        return m
+    t = np.bincount(lab.ravel())
+    t[0] = 0
+    return lab == int(np.argmax(t))
+
+
+def _mancha(crua, passos, par_grosso, area_px=None, teto=1.30):
+    """Mancha fechada de um ambiente: fecha vaos, tapa buracos.
+
+    A AREA DECLARADA PELO REVIT E O FREIO. Fechar e tapar buraco sao operacoes
+    que so podem CRESCER a mancha, e ja aconteceu de crescerem demais: um
+    ambiente em forma de U tem o comodo do vizinho "dentro" dele, o
+    fill_holes engole o vizinho inteiro e o comodo certo fica sem piso.
+    (Medido: Á. IMPERMEÁVEL de 3,30 m2 saindo com 11,06 e comendo metade da
+    garagem.) Por isso aqui se testam varias forcas de fechamento e fica a
+    que chega mais perto da area do projeto SEM passar do teto.
+    """
+    limite = area_px * teto if area_px else None
+    base = crua & ~par_grosso
+
+    def candidatos():
+        yield base
+        yield _so_a_maior(base)
+        for p in (passos, max(passos, int(passos * 3) + 1)):
+            fechado = _fechar(crua, p) & ~par_grosso
+            yield fechado
+            yield _so_a_maior(fechado)
+            cheio = ndimage.binary_fill_holes(_fechar(crua, p)) & ~par_grosso
+            yield cheio
+            yield _so_a_maior(cheio)
+
+    melhor, tam = base, int(base.sum())
+    for c in candidatos():
+        n = int(c.sum())
+        if n <= tam:
+            continue
+        if limite is not None and n > limite:
+            continue
+        melhor, tam = c, n
+    return melhor
 
 
 def _px_por_m2(cruas, celulas, areas):
@@ -166,6 +199,23 @@ def _px_por_m2(cruas, celulas, areas):
     if len(razoes) >= 2:
         return float(np.median(razoes))
     return None
+
+
+def _ppm_das_cores(cruas, areas, tol=0.35):
+    razoes = []
+    for m, a in zip(cruas, areas):
+        if a < 1.0 or not m.any():
+            continue
+        f = ndimage.binary_fill_holes(
+            ndimage.binary_closing(m, np.ones((3, 3)), iterations=6))
+        razoes.append(f.sum() / a)
+    if len(razoes) < 3:
+        return None
+    med = float(np.median(razoes))
+    bons = [r for r in razoes if abs(r - med) / med <= tol]
+    if len(bons) < 3:
+        return None
+    return float(np.median(bons))
 
 
 def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
@@ -217,7 +267,9 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
     celulas, _ = ndimage.label(~par_grosso)
 
     # --------------------------------------------------- 2b. escala de verdade
-    k = _px_por_m2(cruas, celulas, areas)
+    k = _ppm_das_cores(cruas, areas)
+    if k is None:
+        k = _px_por_m2(cruas, celulas, areas)
     medida = k is not None
     if not medida:
         k = ((dpi / 25.4) * 1000 / escala_ficha) ** 2
@@ -244,6 +296,15 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
     amb, seg = [], np.zeros(img.shape[:2], np.int32)
     cores_usadas, cotas = [], [0]
     remendo = 0
+    # O QUE O MOVEL TAPOU: dentro da mancha de cor de um ambiente, o pixel que
+    # NAO tem a cor daquele ambiente e alguma coisa desenhada opaca por cima -
+    # cama, sofa, bancada, louca, escada. E o registro exato da pegada do
+    # mobiliario, e nao depende de fechar contorno no traco (que nestes PDFs
+    # sai cinza e fino demais para isso).
+    # So o buraco DENTRO da mancha conta. O que o ambiente ganha depois, no
+    # crescimento ate a cota, e area que a cor nunca cobriu: entra ali um
+    # comodo inteiro, nao um movel.
+    sobreposto = np.zeros(img.shape[:2], bool)
     for it, rgb, crua in zip(itens, rgbs, cruas):
         if crua.sum() < 40:
             continue
@@ -252,12 +313,14 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
         # o movel e o texto sao desenhados POR CIMA: a mancha sai furada.
         # fechar + tapar buraco devolve o comodo - e continua sendo leitura,
         # porque o limite de fora e a cor, nao um palpite.
-        m = _mancha(crua, passos, par_grosso)
+        area_px = area * k if area else None
+        m = _mancha(crua, passos, par_grosso, area_px)
         # mancha muito menor que a area declarada = preenchimento HACHURADO em
         # vez de solido. Com hachura a cor cobre so ~15% do comodo (medido).
         # Fechar mais forte costura as listras de volta numa mancha inteira.
         if area and m.sum() / k < 0.55 * area:
-            forte = _mancha(crua, max(passos, int(0.30 * ppm / 2.0)), par_grosso)
+            forte = _mancha(crua, max(passos, int(0.30 * ppm / 2.0)), par_grosso,
+                            area_px)
             if forte.sum() > m.sum() * 1.2:
                 m = forte
                 remendo += 1
@@ -267,6 +330,7 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
         if not m.any():
             continue
         seg[m] = i
+        sobreposto |= m & ~crua
         cores_usadas.append(rgb)
         lido = float(m.sum()) / k
         cotas.append(int(round(area * k)) if area else 10 ** 12)
@@ -339,7 +403,8 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
                 _CAUSA_RASTER if rasterizado else _CAUSA_COR))
 
     lote = ndimage.binary_fill_holes(seg > 0) | paredes
-    return dict(page=page, amb=amb, img=img, paredes=paredes,
+    sobreposto &= ~par_grosso
+    return dict(page=page, amb=amb, img=img, paredes=paredes, sobreposto=sobreposto,
                 par=ndimage.binary_closing(paredes, np.ones((5, 5))),
                 tapa=np.zeros(img.shape[:2], bool), lote=lote,
                 interno=(seg > 0), seg=seg, k=k, escala=escala,

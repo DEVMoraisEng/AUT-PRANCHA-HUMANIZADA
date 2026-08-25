@@ -105,6 +105,18 @@ def _fechar(m, passos):
     return ndimage.binary_closing(m, np.ones((3, 3)), iterations=int(passos))
 
 
+def _mancha(crua, passos, par_grosso):
+    """Mancha fechada de um ambiente: fecha vaos, tapa buracos, fica com a
+    maior parte continua."""
+    m = ndimage.binary_fill_holes(_fechar(crua, passos)) & ~par_grosso
+    lab, n = ndimage.label(m)
+    if n > 1:
+        t = np.bincount(lab.ravel())
+        t[0] = 0
+        m = lab == int(np.argmax(t))
+    return m
+
+
 def _px_por_m2(cruas, celulas, areas):
     """Mede pixels por m2 no proprio desenho, usando os comodos FECHADOS.
 
@@ -204,31 +216,41 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
                             _reamostrado=True)
     escala = (dpi / 25.4) * 1000 / ppm
 
-    # ------------------------------------------- 3. mancha limpa de cada um
+    # ------------------------------------------- 3. mancha de cada ambiente
+    #
+    # Ja tentei delimitar pelo espaco cercado por parede ("celula"): nao
+    # funciona nestes PDFs. A parede sai como HACHURA de linhas, o vazio passa
+    # entre as listras, e porta e janela abrem o resto - a planta inteira vira
+    # uma celula so. Medido: 2 celulas para 13 ambientes. Quem delimita aqui e
+    # a cor, ponto.
     passos = max(1, int(FECHO_M * ppm / 2.0))
     amb, seg = [], np.zeros(img.shape[:2], np.int32)
     cores_usadas, cotas = [], [0]
+    remendo = 0
     for it, rgb, crua in zip(itens, rgbs, cruas):
-        i = len(amb) + 1
         if crua.sum() < 40:
             continue
+        area = float(it.get("area") or 0)
+        i = len(amb) + 1
         # o movel e o texto sao desenhados POR CIMA: a mancha sai furada.
         # fechar + tapar buraco devolve o comodo - e continua sendo leitura,
         # porque o limite de fora e a cor, nao um palpite.
-        m = ndimage.binary_fill_holes(_fechar(crua, passos)) & ~par_grosso
-        lab, n = ndimage.label(m)
-        if n > 1:                       # fica so com a mancha principal
-            tam = np.bincount(lab.ravel())
-            tam[0] = 0
-            m = lab == int(np.argmax(tam))
+        m = _mancha(crua, passos, par_grosso)
+        # mancha muito menor que a area declarada = preenchimento HACHURADO em
+        # vez de solido. Com hachura a cor cobre so ~15% do comodo (medido).
+        # Fechar mais forte costura as listras de volta numa mancha inteira.
+        if area and m.sum() / k < 0.55 * area:
+            forte = _mancha(crua, max(passos, int(0.30 * ppm / 2.0)), par_grosso)
+            if forte.sum() > m.sum() * 1.2:
+                m = forte
+                remendo += 1
         if not m.any():
             continue
-        m &= seg == 0
+        m = m & (seg == 0)
         if not m.any():
             continue
         seg[m] = i
         cores_usadas.append(rgb)
-        area = float(it.get("area") or 0)
         lido = float(m.sum()) / k
         cotas.append(int(round(area * k)) if area else 10 ** 12)
         amb.append({

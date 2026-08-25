@@ -51,28 +51,22 @@ def _mascara_da_cor(img, rgb, tol=26):
     return d <= tol
 
 
-def _classificar(img, rgbs, tol_max=45):
+def _classificar(img, rgbs, tol=40):
     """Cada pixel vai para a cor de ficha MAIS PROXIMA - nao para "todas as
     que estao dentro de uma tolerancia".
 
-    Isto nao e detalhe. Com 16 ambientes, as cores que o Revit gera chegam a
-    ficar 19 de distancia entre si; com limiar fixo de 26 as manchas de dois
-    comodos se sobrepoem e um engole o outro - a QUARTO 01 de 5,64 m2 apareceu
-    com 15,50 m2 porque tinha comido a garagem ao lado. Vizinho mais proximo
-    nao tem esse problema: cada pixel tem um dono so.
+    Isto nao e detalhe. Com 16 ambientes as cores que o Revit gera chegam a
+    ficar 19 de distancia entre si; com limiar fixo as manchas de dois comodos
+    se sobrepoem e um engole o outro - a QUARTO 01 de 5,64 m2 ja apareceu com
+    15,50 m2 porque tinha comido a garagem ao lado. Vizinho mais proximo nao
+    tem esse problema: cada pixel tem um dono so, e a tolerancia so decide
+    "isto e cor de ambiente ou e parede/traco/papel".
 
-    A tolerancia ainda existe, para o traco preto e a parede nao virarem
-    ambiente, mas e calculada a partir do espacamento REAL das cores da ficha:
-    nunca passa da metade da menor distancia entre duas delas. O miolo do
-    comodo tem a cor exata (distancia zero), entao nada de util se perde - e
-    o pixel ambiguo da borda fica sem dono em vez de ir para o comodo errado.
+    Por isso a tolerancia pode - e deve - ser folgada. Ja tentei aperta-la
+    para metade do espacamento das cores: qualquer desvio de cor do PDF
+    (perfil de cor, conversao na impressao) derrubava a leitura inteira.
     """
-    tol = tol_max
-    if len(rgbs) > 1:
-        menor = min(max(abs(x - y) for x, y in zip(a, b))
-                    for i, a in enumerate(rgbs) for b in rgbs[i + 1:])
-        tol = int(max(6, min(tol_max, (menor - 1) // 2)))
-    melhor_d = np.full(img.shape[:2], 1e9, np.float32)
+    melhor_d = np.full(img.shape[:2], np.inf, np.float32)
     dono = np.zeros(img.shape[:2], np.int32)
     base = img.astype(np.int16)
     for i, c in enumerate(rgbs, start=1):
@@ -81,7 +75,26 @@ def _classificar(img, rgbs, tol_max=45):
         melhor_d[troca] = d[troca]
         dono[troca] = i
     dono[melhor_d > tol] = 0      # longe de todas: nao e ambiente (parede, traco)
-    return dono
+    return dono, melhor_d
+
+
+def _achou_bastante(dono, n, mininmo_px=200):
+    """Quantos ambientes da ficha aparecem de fato no PDF."""
+    conta = np.bincount(dono.ravel(), minlength=n + 1)
+    return int((conta[1:] >= mininmo_px).sum())
+
+
+def _diagnostico(img, rgbs, nomes):
+    """Por que as cores nao bateram? Mede a distancia entre a cor pedida e a
+    cor mais parecida que existe no PDF - e isso que separa "PDF de outra
+    exportacao" de "PDF certo, com a cor deslocada"."""
+    base = img.astype(np.int16)
+    linhas = []
+    for c, nome in zip(rgbs, nomes):
+        d = int(np.abs(base - np.array(c, np.int16)).max(axis=2).min())
+        linhas.append((d, nome, c))
+    linhas.sort()
+    return linhas
 
 
 def _fechar(m, passos):
@@ -130,33 +143,6 @@ def _px_por_m2(cruas, celulas, areas):
     return None
 
 
-def _px_por_m2_direto(cruas, areas, area_minima=1.5, folga=0.35):
-    """Mede pixels por m2 direto na mancha crua de cada ambiente, sem
-    depender de parede nenhuma.
-
-    Serve para quando _px_por_m2() falha por falta de celula fechada -
-    caso da planta cuja parede interna nao sai em hachura vermelha (so
-    linha fina cinza), que e o unico sinal que aquela funcao reconhece.
-    Cada ambiente sozinho ja da uma razao pixel/m2; a mediana de varios
-    ambientes e uma medida robusta da escala real do PDF mesmo que
-    algum deles esteja com a mancha comida por movel ou por outro
-    ambiente desenhado por cima (a folga de 35% em torno da mediana
-    deixa esses de fora da conta, em vez de estragar a escala de todos).
-    """
-    pares = [(m.sum(), a) for m, a in zip(cruas, areas)
-             if a >= area_minima and m.any()]
-    if len(pares) < 3:
-        return None
-    razoes = np.array([px / a for px, a in pares], np.float64)
-    med = np.median(razoes)
-    if med <= 0:
-        return None
-    boas = razoes[np.abs(razoes - med) <= folga * med]
-    if len(boas) < 3:
-        return None
-    return float(np.median(boas))
-
-
 def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
              _reamostrado=False):
     """Mesmo formato de saida de pipeline.preparar(), mas sem adivinhar nada."""
@@ -179,7 +165,15 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
 
     # ------------------------------------------------- 1. onde esta cada cor
     rgbs = [tuple(int(c) for c in it["cor"]) for it in itens]
-    dono = _classificar(img, rgbs)
+    nomes_ficha = [it.get("nome", "?") for it in itens]
+    # tolerancia folgada, e afrouxa mais se o PDF vier com a cor deslocada
+    # (perfil de cor, conversao na exportacao). Vizinho mais proximo ja impede
+    # que dois comodos se misturem, entao afrouxar aqui e barato e seguro.
+    for tol in (40, 60, 85):
+        dono, _dist = _classificar(img, rgbs, tol)
+        if _achou_bastante(dono, len(rgbs)) >= max(1, len(rgbs) // 2):
+            break
+    tol_usada = tol
     cruas = [dono == i for i in range(1, len(rgbs) + 1)]
     areas = [float(it.get("area") or 0) for it in itens]
 
@@ -194,19 +188,9 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
     celulas, _ = ndimage.label(~par_grosso)
 
     # --------------------------------------------------- 2b. escala de verdade
-    # _px_por_m2 (celula fechada por parede) e a medida sem vies: nao depende
-    # de quanto movel tem em cada comodo. So existe quando a planta tem parede
-    # em hachura vermelha separando os ambientes (ver Guia PyRevit - botao
-    # forca isso desde Maio/2026). Falhando isso, sobra medir na propria
-    # mancha de cor - e ai o movel (desenhado por cima da tinta) pesa: a
-    # mancha CRUA sempre falta um pouco. Por isso usamos ela so como palpite
-    # inicial (decidir o dpi de reamostragem) e refinamos depois com a mancha
-    # JA RECUPERADA (passo 3), que falta bem menos.
     k = _px_por_m2(cruas, celulas, areas)
-    medida_sem_vies = k is not None
-    if not medida_sem_vies:
-        k = _px_por_m2_direto(cruas, areas)
-    if k is None:
+    medida = k is not None
+    if not medida:
         k = ((dpi / 25.4) * 1000 / escala_ficha) ** 2
     ppm = float(np.sqrt(k))
 
@@ -218,69 +202,28 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
             return preparar(pdf, ficha, dpi=novo, pagina=pagina,
                             apelidos=apelidos, sem_numero=sem_numero,
                             _reamostrado=True)
+    escala = (dpi / 25.4) * 1000 / ppm
 
     # ------------------------------------------- 3. mancha limpa de cada um
-    # so limpa (fecha vao + tapa buraco de movel) aqui - ainda NAO decide
-    # quem fica com qual pixel, porque isso depende do k final (passo 3b).
     passos = max(1, int(FECHO_M * ppm / 2.0))
-    brutos = []
+    amb, seg = [], np.zeros(img.shape[:2], np.int32)
+    cores_usadas, cotas = [], [0]
     for it, rgb, crua in zip(itens, rgbs, cruas):
+        i = len(amb) + 1
         if crua.sum() < 40:
             continue
-        # o buraco do movel so fecha se estiver TOTALMENTE cercado por cor
-        # do proprio ambiente - e o movel encostado na parede (cama com
-        # cabeceira na parede, por exemplo) nao fecha: o buraco toca o
-        # limite da mancha exatamente onde a parede comeca, sem nenhuma cor
-        # de ambiente entre os dois. Juntar a parede ANTES do preenchimento
-        # resolve isso - mas SO quando ESTE ambiente especifico realmente
-        # tem parede detectada na borda (confere medindo, nao supondo: uma
-        # porta sempre deixa um vao sem parede, e exigir fechamento 100%
-        # (por celula) desligaria o recurso na casa toda por causa de uma
-        # porta so). Sem essa checagem, um ambiente com parede pouco ou nada
-        # detectada (planta com parede interna em linha fina, nao hachura)
-        # vazaria o preenchimento pro vizinho - ja vi acontecer. E so a
-        # parede que encosta NESTE ambiente entra na conta (dilatacao curta
-        # a partir da propria mancha), nunca a rede de parede da casa toda.
-        borda = crua & ~ndimage.binary_erosion(crua, np.ones((3, 3)))
-        alcance = ndimage.binary_dilation(par_grosso, np.ones((3, 3)), iterations=passos + 2)
-        cobertura = (borda & alcance).sum() / max(1, borda.sum())
-        if cobertura > 0.15:
-            vizinhas = par_grosso & ndimage.binary_dilation(
-                crua, np.ones((3, 3)), iterations=passos + 2)
-            fechada = _fechar(crua, passos) | vizinhas
-        else:
-            fechada = _fechar(crua, passos)
-        m0 = ndimage.binary_fill_holes(fechada) & ~par_grosso
-        lab, n = ndimage.label(m0)
+        # o movel e o texto sao desenhados POR CIMA: a mancha sai furada.
+        # fechar + tapar buraco devolve o comodo - e continua sendo leitura,
+        # porque o limite de fora e a cor, nao um palpite.
+        m = ndimage.binary_fill_holes(_fechar(crua, passos)) & ~par_grosso
+        lab, n = ndimage.label(m)
         if n > 1:                       # fica so com a mancha principal
             tam = np.bincount(lab.ravel())
             tam[0] = 0
-            m0 = lab == int(np.argmax(tam))
-        if not m0.any():
+            m = lab == int(np.argmax(tam))
+        if not m.any():
             continue
-        brutos.append((it, rgb, m0))
-
-    if not brutos:
-        raise ValueError("A ficha nao bateu com nenhuma cor do PDF. Confira se "
-                         "o JSON e o PDF sao da mesma exportacao.")
-
-    # --------------------------------------------- 3b. refinar a escala
-    # a mancha RECUPERADA (fechar+preencher) falta bem menos area que a
-    # crua - fica mais perto do real. So refina quando a medida inicial teve
-    # vies (a por celula fechada ja e exata, nao precisa e nao deve mudar).
-    if not medida_sem_vies:
-        k_fino = _px_por_m2_direto([m for _, _, m in brutos],
-                                   [float(it.get("area") or 0) for it, _, _ in brutos])
-        if k_fino:
-            k = k_fino
-            ppm = float(np.sqrt(k))
-    escala = (dpi / 25.4) * 1000 / ppm
-
-    amb, seg = [], np.zeros(img.shape[:2], np.int32)
-    cores_usadas, cotas = [], [0]
-    for it, rgb, m0 in brutos:
-        i = len(amb) + 1
-        m = m0 & (seg == 0)
+        m &= seg == 0
         if not m.any():
             continue
         seg[m] = i
@@ -297,8 +240,17 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
         })
 
     if not amb:
-        raise ValueError("A ficha nao bateu com nenhuma cor do PDF. Confira se "
-                         "o JSON e o PDF sao da mesma exportacao.")
+        pior = _diagnostico(img, rgbs, nomes_ficha)
+        raise ValueError(
+            "Nenhuma cor da ficha foi encontrada no PDF.\n"
+            "A cor mais parecida que existe no desenho esta a {0} de distancia "
+            "da primeira cor da ficha (procurei ate {1}).\n"
+            "Distancia perto de zero = PDF certo. Distancia grande = o PDF e "
+            "de outra exportacao, ou foi exportado em preto e branco.\n"
+            "Exemplos: {2}".format(
+                pior[0][0], tol_usada,
+                "; ".join("{0} pedia {1}, mais perto {2}".format(n, c, d)
+                          for d, n, c in pior[:3])))
 
     # ------------------------------------ 4. recuperar o que o movel escondeu
     # A cor diz QUEM e o ambiente; a parede diz ATE ONDE ele pode ir; a area
@@ -334,9 +286,20 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
 
     reprovados = sum(1 for a in amb if not a["confiavel"])
     if reprovados > len(amb) / 2.0:
-        raise ValueError("O PDF e o JSON nao parecem da mesma exportacao: "
-                         "{0} de {1} ambientes nao bateram."
-                         .format(reprovados, len(amb)))
+        piores = sorted(amb, key=lambda a: a["lido"])[:4]
+        raise ValueError(
+            "O PDF e o JSON nao parecem da mesma exportacao: {0} de {1} "
+            "ambientes nao bateram.\n"
+            "Escala medida no desenho: 1:{2:.0f} · tolerancia de cor usada: "
+            "{3} · pixels por metro: {4:.0f}\n"
+            "Os que menos apareceram: {5}\n"
+            "Se as areas lidas estao todas perto de zero, a mancha de cor saiu "
+            "vazada (hachura em vez de solido) ou o PDF foi exportado sem "
+            "cor. Rode de novo o botao Planta Humanizada e confira se a planta "
+            "aparece colorida no Revit.".format(
+                reprovados, len(amb), escala, tol_usada, ppm,
+                "; ".join("{0} pedia {1:.2f} m2, achei {2:.2f}".format(
+                    a["nome"], a["area"], a["lido"]) for a in piores)))
 
     lote = ndimage.binary_fill_holes(seg > 0) | paredes
     return dict(page=page, amb=amb, img=img, paredes=paredes,

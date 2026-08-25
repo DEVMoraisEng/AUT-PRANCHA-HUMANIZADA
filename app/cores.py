@@ -37,6 +37,19 @@ MINIMO_LIDO = 0.45
 FALTA_TOLERADA = 0.35
 
 
+_CAUSA_RASTER = (
+    "CAUSA PROVAVEL: este PDF veio como IMAGEM, nao como desenho vetorial - "
+    "e o que o Revit faz quando a vista esta em modo SOMBREADO. A cor de cada "
+    "ambiente chega amassada pela compressao e nenhum pixel fica com a cor "
+    "exata da ficha. Atualize a extensao do Revit (a versao nova poe a vista "
+    "em Linha Oculta) e exporte de novo.")
+
+_CAUSA_COR = (
+    "Se as areas lidas estao todas perto de zero, a mancha de cor saiu vazada "
+    "(hachura em vez de solido) ou o PDF foi exportado sem cor. Rode de novo o "
+    "botao Planta Humanizada e confira se a planta aparece colorida no Revit.")
+
+
 def carregar_ficha(caminho_ou_texto):
     """Aceita o caminho do .json ou o proprio conteudo."""
     try:
@@ -172,6 +185,10 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
 
     doc = pymupdf.open(pdf)
     page = doc[pagina]
+    # PDF do Revit em vista SOMBREADA sai como mosaico de JPEG, sem um unico
+    # vetor. Ai nenhum pixel tem a cor exata do ambiente, o desenho chega
+    # borrado e a leitura desmorona. Vale a pena dizer isso na cara.
+    rasterizado = not page.get_drawings() and bool(page.get_images())
     pix = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csRGB)
     img = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3).copy()
 
@@ -315,13 +332,11 @@ def preparar(pdf, ficha, dpi=None, pagina=0, apelidos=None, sem_numero=False,
             "Escala medida no desenho: 1:{2:.0f} · tolerancia de cor usada: "
             "{3} · pixels por metro: {4:.0f}\n"
             "Os que menos apareceram: {5}\n"
-            "Se as areas lidas estao todas perto de zero, a mancha de cor saiu "
-            "vazada (hachura em vez de solido) ou o PDF foi exportado sem "
-            "cor. Rode de novo o botao Planta Humanizada e confira se a planta "
-            "aparece colorida no Revit.".format(
+            "{6}".format(
                 reprovados, len(amb), escala, tol_usada, ppm,
                 "; ".join("{0} pedia {1:.2f} m2, achei {2:.2f}".format(
-                    a["nome"], a["area"], a["lido"]) for a in piores)))
+                    a["nome"], a["area"], a["lido"]) for a in piores),
+                _CAUSA_RASTER if rasterizado else _CAUSA_COR))
 
     lote = ndimage.binary_fill_holes(seg > 0) | paredes
     return dict(page=page, amb=amb, img=img, paredes=paredes,

@@ -105,13 +105,9 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
 
   <div class="card">
     <h2>2 · Dados da casa</h2>
-    <div class="campos">
-      <div><label>Título da prancha</label><input id="titulo" placeholder="deixe vazio para não sair título"></div>
-      <div><label>Numeração dos ambientes</label>
-        <select id="semnum">
-          <option value="0">QUARTO 01, BANHO 02…</option>
-          <option value="1">Sem número: QUARTO, BANHO</option>
-        </select></div>
+    <div>
+      <label>Título da prancha</label>
+      <input id="titulo" placeholder="deixe vazio para não sair título">
     </div>
     <div class="campos tres" style="margin-top:12px">
       <div><label>Área construída (m²)</label><input id="construida" inputmode="decimal" placeholder="soma dos ambientes"></div>
@@ -239,8 +235,10 @@ function liberar() { $("b-gerar").disabled = !(pronto && arq.planta && arq.facha
 function tentarLer() {
   if (!pronto || !arq.planta) return;
   status("Lendo os ambientes da planta…"); barra(30);
+  // o nome do ambiente na peca de venda e sempre sem numero: QUARTO, nao
+  // QUARTO 02. Quem quiser outro nome edita a coluna da tabela.
   w.postMessage({ tipo: "ler", planta: arq.planta, ficha: arq.ficha,
-                  semNumero: $("semnum").value === "1" });
+                  semNumero: true });
 }
 
 /* ---------- tabela de ambientes ---------- */
@@ -287,8 +285,6 @@ function coletar(attr) {
 }
 
 /* ---------- gerar ---------- */
-$("semnum").onchange = () => { if (pronto && arq.planta) tentarLer(); };
-
 $("b-gerar").onclick = () => {
   if (!arq.planta || !arq.fachada) { status("Faltam os PDFs da planta e da fachada.", true); return; }
   $("c-detalhe").classList.add("esconde");
@@ -299,7 +295,7 @@ $("b-gerar").onclick = () => {
     tipo: "gerar", planta: arq.planta, fachada: arq.fachada, ficha: arq.ficha,
     titulo: $("titulo").value.trim(), lote: num("lote"),
     construida: num("construida"), quintal: num("quintal"),
-    semNumero: $("semnum").value === "1",
+    semNumero: true,
     pisos: coletar("piso"), apelidos: coletar("nome"),
   });
 };

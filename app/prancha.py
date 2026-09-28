@@ -1,6 +1,7 @@
 """
 Monta a prancha final em PDF sobre o papel timbrado da Morais:
-titulo + planta humanizada + fachada 3D + descricao + quadro de areas.
+titulo + planta humanizada + fachada 3D + descricao + resumo de areas.
+(O quadro de ambientes saiu em 28/09: as areas ja estao na planta.)
 Todo numero que aparece aqui vem da planta. Nada e estimado.
 """
 import re, io
@@ -37,29 +38,92 @@ BOLD = fonte_arquivo(True)
 DESCOBERTO = r"(?<!IM)PERME[AÁ]VEL|GRAMA|QUINTAL"
 
 
-def resumo(amb):
-    """Le os nomes dos ambientes e monta a descricao da casa. So contagem."""
-    nomes = [a["nome"].upper() for a in amb]
-    quartos = sum(bool(re.search(r"QUARTO|DORM", n)) for n in nomes)
-    suites = sum(bool(re.search(r"SU[IÍ]TE", n)) for n in nomes)
-    banhos = sum(bool(re.search(r"BANHO|WC|LAVABO", n)) for n in nomes)
+_CHURRAS = re.compile(r"CHURRASQ")
+
+
+def tem_churrasqueira(amb, textos=()):
+    """A churrasqueira raramente e AMBIENTE no Revit - costuma ser familia com
+    texto/etiqueta. Procura nos nomes e em todo texto escrito na planta."""
+    alvo = " ".join([a.get("nome", "") for a in amb] + list(textos or ())).upper()
+    return bool(_CHURRAS.search(alvo))
+
+
+def _plural(n, sing, plur):
+    return f"{n} {sing if n == 1 else plur}"
+
+
+def resumo(amb, churrasqueira=None, textos=()):
+    """Descricao comercial da casa, montada SO a partir do que a planta tem.
+
+    Cada linha sai de um nome de ambiente (ou de um texto da planta, no caso
+    da churrasqueira). Nada e suposto: sem ambiente GOURMET nao sai "gourmet".
+    A pessoa ainda revisa e edita tudo na tela antes de gerar.
+    """
+    nomes = [" ".join(a["nome"].upper().split()) for a in amb]
+    if churrasqueira is None:
+        churrasqueira = tem_churrasqueira(amb, textos)
+
+    def tem(padrao, excluir=None):
+        return any(re.search(padrao, n) and not (excluir and re.search(excluir, n))
+                   for n in nomes)
+
     linhas = []
+    # ---- quartos ------------------------------------------------------------
+    suites = sum(bool(re.search(r"SU[IÍ]TE", n)) for n in nomes)
+    quartos = sum(bool(re.search(r"QUARTO|DORM", n)) and not re.search(r"SU[IÍ]TE", n)
+                  for n in nomes)
     tot = quartos + suites
-    if tot:
-        t = f"{tot} QUARTO" + ("S" if tot > 1 else "")
+    if tot and suites == tot:
+        linhas.append(_plural(suites, "SUÍTE", "SUÍTES"))
+    elif tot:
+        t = _plural(tot, "QUARTO", "QUARTOS")
         if suites:
-            t += f" SENDO {suites} SUÍTE" + ("S" if suites > 1 else "")
+            t += " SENDO " + _plural(suites, "SUÍTE", "SUÍTES")
         linhas.append(t)
+    # ---- banheiros ----------------------------------------------------------
+    banhos = sum(bool(re.search(r"BANH|\bWC\b|SANIT", n)) for n in nomes)
+    lavabos = sum(bool(re.search(r"LAVABO", n)) for n in nomes)
     if banhos:
-        linhas.append(f"{banhos} BANHEIRO" + ("S" if banhos > 1 else ""))
-    if any("GOURMET" in n and "GARAGEM" in n for n in nomes):
-        linhas.append("GARAGEM COM ÁREA GOURMET INTEGRADA")
-    elif any("GOURMET" in n for n in nomes):
-        linhas.append("ÁREA GOURMET")
-    if any(re.search(r"JD\.|JARDIM", n) for n in nomes):
-        linhas.append("JARDIM DE INVERNO")
-    if any(re.search(r"SERVI[CÇ]O", n) for n in nomes):
+        t = _plural(banhos, "BANHEIRO", "BANHEIROS")
+        if lavabos:
+            t += " + LAVABO"
+        linhas.append(t)
+    elif lavabos:
+        linhas.append("LAVABO")
+    # ---- social -------------------------------------------------------------
+    if tem(r"SALA.*COZINHA|COZINHA.*SALA|COZINHA AMERICANA|CONCEITO ABERTO"):
+        linhas.append("SALA E COZINHA INTEGRADAS")
+    # ---- gourmet / churrasqueira --------------------------------------------
+    com_ch = " COM CHURRASQUEIRA" if churrasqueira else ""
+    if tem(r"GARAGEM.*GOURMET|GOURMET.*GARAGEM"):
+        linhas.append("GARAGEM GOURMET" + com_ch if churrasqueira
+                      else "GARAGEM COM ÁREA GOURMET INTEGRADA")
+    elif tem(r"VARANDA.*GOURMET|GOURMET.*VARANDA"):
+        linhas.append("COM VARANDA GOURMET" + (" E CHURRASQUEIRA" if churrasqueira else ""))
+    elif tem(r"GOURMET", excluir=r"SERVI[CÇ]O"):
+        linhas.append("COM ÁREA GOURMET" + (" E CHURRASQUEIRA" if churrasqueira else ""))
+    elif tem(r"SERVI[CÇ]O.*GOURMET"):
+        linhas.append("ÁREA DE SERVIÇO E GOURMET" + com_ch)
+    elif churrasqueira:
+        linhas.append("COM CHURRASQUEIRA")
+    # ---- demais -------------------------------------------------------------
+    if tem(r"SERVI[CÇ]O|LAVAND", excluir=r"GOURMET"):
         linhas.append("ÁREA DE SERVIÇO INDEPENDENTE")
+    if tem(r"GARAGEM", excluir=r"GOURMET"):
+        linhas.append("GARAGEM DESCOBERTA" if tem(r"GARAGEM.*DESCOBERT")
+                      else "GARAGEM COBERTA")
+    if tem(r"VARANDA", excluir=r"GOURMET"):
+        linhas.append("VARANDA")
+    if tem(r"JD\.|JARDIM DE INVERNO"):
+        linhas.append("JARDIM DE INVERNO")
+    if tem(r"CLOSET"):
+        linhas.append("SUÍTE COM CLOSET")
+    if tem(r"ESCRIT|OFFICE"):
+        linhas.append("ESCRITÓRIO")
+    if tem(r"DESPENSA"):
+        linhas.append("DESPENSA")
+    if tem(r"PISCINA"):
+        linhas.append("PISCINA")
     return linhas
 
 
@@ -131,7 +195,8 @@ def _num(v):
 
 
 def _dir(pg, x_dir, y, txt, fonte, tam, cor):
-    w = pymupdf.get_text_length(txt, fontname="helv", fontsize=tam)
+    # mede com a fonte que vai ser usada (DejaVu), nao com a Helvetica
+    w = _larg(txt, fonte == "DJB", tam)
     pg.insert_text((x_dir - w, y), txt, fontname=fonte, fontsize=tam, color=cor)
 
 
@@ -180,12 +245,14 @@ ET_CHAMADA_AREA = 5.2
 
 
 def _placa(pg, x0, y0, x1, y1):
-    """Chapa clara sob a etiqueta: garante contraste sem tapar o desenho."""
+    """Chapa clara sob a etiqueta. DESLIGADA desde 28/09 (fundo transparente,
+    como na planta renderizada de referencia); fica aqui so para quem chamar
+    _escrever(..., placa=True) de proposito."""
     pg.draw_rect(pymupdf.Rect(x0, y0, x1, y1), color=None, fill=(1, 1, 1),
                  fill_opacity=0.68)
 
 
-def _escrever(pg, cx, topo, nome_linhas, area_txt, tn, ta, placa=True):
+def _escrever(pg, cx, topo, nome_linhas, area_txt, tn, ta, placa=False):
     """Bloco nome + area centrado em cx, comecando em 'topo'. Devolve a altura."""
     gap = tn * 0.20
     larguras = [_larg(t, True, tn) for t in nome_linhas]
@@ -313,7 +380,7 @@ def _etiquetar(pg, etiquetas, caixa, x_esq, x_dir, img_x0, img_x1, y_topo, y_bas
                 dentro = (linhas, tn, ta, alt, r)
         if dentro:
             linhas, tn, ta, alt, r = dentro
-            _escrever(pg, px, py - alt / 2, linhas, area_txt, tn, ta)
+            _escrever(pg, px, py - alt / 2, linhas, area_txt, tn, ta, placa=False)
             ocupados.append(r)
         else:
             meio = (img_x0 + img_x1) / 2
@@ -327,7 +394,8 @@ def _etiquetar(pg, etiquetas, caixa, x_esq, x_dir, img_x0, img_x1, y_topo, y_bas
 def montar(planta_img, tres_d_pdf, amb, titulo, saida, area_lote=None,
            timbrado="tb/word/media/image1.jpeg", humanizar_3d=True,
            area_construida=None, area_quintal=None, pecas=None,
-           etiquetas=None):
+           etiquetas=None, caracteristicas=None, churrasqueira=None,
+           textos=(), telhado="revit"):
     doc = pymupdf.open()
     pg = doc.new_page(width=595.276, height=841.89)
     W = pg.rect.width
@@ -377,12 +445,8 @@ def montar(planta_img, tres_d_pdf, amb, titulo, saida, area_lote=None,
                    cx, cx + pw, y_planta, y_planta + ph)
 
     # ---------------- fachada 3D --------------------------------------------
-    if humanizar_3d:
-        im3 = fachada.humanizar(tres_d_pdf, dpi=300)
-    else:
-        p3 = pymupdf.open(tres_d_pdf)[0].get_pixmap(dpi=260, colorspace=pymupdf.csRGB)
-        im3 = recortar(Image.frombytes("RGB", (p3.width, p3.height), p3.samples), margem=8)
-    tw, th = _cabe(im3.width, im3.height, largR, 178)
+    im3 = fachada.carregar(tres_d_pdf, humanizar=humanizar_3d, telhado=telhado)
+    tw, th = _cabe(im3.width, im3.height, largR, 190)
     tx = colR + (largR - tw) / 2
     pg.insert_text((colR, y + 5), "PERSPECTIVA / FACHADA", fontname="DJB",
                    fontsize=7.6, color=PETROL)
@@ -390,51 +454,46 @@ def montar(planta_img, tres_d_pdf, amb, titulo, saida, area_lote=None,
                     stream=_bytes(im3, int(tw / 72 * 450), q=95))
 
     # ---------------- caracteristicas ---------------------------------------
-    yd = y + 13 + th + 18
-    pg.insert_text((colR, yd), "CARACTERÍSTICAS", fontname="DJB", fontsize=7.6, color=PETROL)
-    yd += 12
-    for ln in resumo(amb):
-        pg.draw_circle(pymupdf.Point(colR + 2.4, yd - 2.6), 1.6, color=None, fill=MINT)
-        pg.insert_text((colR + 10, yd), ln, fontname="DJ", fontsize=7,
-                       color=(0.18, 0.18, 0.22))
-        yd += 11.6
+    # Sem o quadro de ambientes (removido em 28/09) sobra folga: a descricao
+    # sobe de corpo e ganha respiro - e ela que vende a casa.
+    if caracteristicas is None:
+        caracteristicas = resumo(amb, churrasqueira, textos)
+    caracteristicas = [c.strip().upper() for c in caracteristicas if c and c.strip()]
+    yd = y + 13 + th + 22
+    pg.insert_text((colR, yd), "CARACTERÍSTICAS", fontname="DJB", fontsize=8.2, color=PETROL)
+    yd += 15
+    tam = 8.0 if len(caracteristicas) <= 9 else 7.2
+    for ln in caracteristicas:
+        # linha comprida quebra em duas em vez de sair da coluna
+        partes = [ln]
+        if _larg(ln, False, tam) > largR - 12:
+            import humanizar
+            partes = humanizar.quebrar(ln)
+        pg.draw_circle(pymupdf.Point(colR + 2.6, yd - 2.9), 1.9, color=None, fill=MINT)
+        for k, t in enumerate(partes):
+            pg.insert_text((colR + 11, yd), t, fontname="DJ", fontsize=tam,
+                           color=(0.16, 0.16, 0.22))
+            yd += tam + 2.6 if k < len(partes) - 1 else 0
+        yd += tam + 6.2
 
     # ---------------- resumo de areas ---------------------------------------
-    yq = yd + 8
+    yq = yd + 10
     A = areas(amb, area_lote, area_construida, area_quintal)
-    alt = 15.0
-    pg.draw_rect(pymupdf.Rect(colR, yq, colR + largR, yq + alt * len(A) + 7),
+    alt = 17.0
+    pg.draw_rect(pymupdf.Rect(colR, yq, colR + largR, yq + alt * len(A) + 8),
                  color=None, fill=(0.960, 0.969, 0.973))
-    yy = yq + 12
+    yy = yq + 14
     for i, (nome, v) in enumerate(A.items()):
         ult = i == len(A) - 1
         f = "DJB" if ult else "DJ"
-        pg.insert_text((colR + 8, yy), nome, fontname=f, fontsize=6.8,
+        pg.insert_text((colR + 9, yy), nome, fontname=f, fontsize=7.4,
                        color=NAVY if ult else (0.25, 0.25, 0.3))
-        _dir(pg, colR + largR - 8, yy, _num(v), f, 7.2, NAVY)
+        _dir(pg, colR + largR - 9, yy, _num(v), f, 7.8, NAVY)
         if not ult:
-            pg.draw_line(pymupdf.Point(colR + 8, yy + 4.6),
-                         pymupdf.Point(colR + largR - 8, yy + 4.6),
+            pg.draw_line(pymupdf.Point(colR + 9, yy + 5.2),
+                         pymupdf.Point(colR + largR - 9, yy + 5.2),
                          color=(0.88, 0.90, 0.92), width=0.5)
         yy += alt
-    yy += 14
-
-    # ---------------- quadro de ambientes (2 colunas) ------------------------
-    pg.insert_text((colR, yy), "QUADRO DE AMBIENTES", fontname="DJB", fontsize=7.6, color=PETROL)
-    yy += 11
-    itens = [a for a in sorted(amb, key=lambda a: -a["area"])
-             if not a["nome"].upper().startswith("AMBIENTE")]
-    linhas = (len(itens) + 1) // 2
-    cw = largR / 2
-    for n, a in enumerate(itens):
-        col, lin = divmod(n, linhas)
-        x = colR + col * cw
-        ly = yy + lin * 8.8
-        rot = a.get("rotulo") or a["nome"]
-        nome = rot if len(rot) <= 21 else rot[:20] + "."
-        pg.insert_text((x, ly), nome, fontname="DJ", fontsize=5.5, color=(0.32, 0.32, 0.36))
-        _dir(pg, x + cw - 8, ly, f"{a['area']:.2f}".replace(".", ",") + " m²",
-             "DJ", 5.5, PETROL)
 
     # sem isto o PNG da planta fica gravado sem compressao e a prancha sai com
     # 11 MB em vez de 1,4 MB - mesmo desenho, mesma resolucao.

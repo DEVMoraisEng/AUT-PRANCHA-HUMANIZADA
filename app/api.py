@@ -45,6 +45,22 @@ def _preparar(caminho, pagina, escala, apelidos, sem_numero, ficha_txt):
                              sem_numero=sem_numero)
 
 
+def _textos(P):
+    """Todo texto escrito na planta - e dali que sai a churrasqueira, que no
+    Revit quase nunca e ambiente."""
+    try:
+        return [w[4] for w in P["page"].get_text("words")]
+    except Exception:
+        return []
+
+
+def descrever(nomes_json, churrasqueira=False):
+    """Refaz a descricao quando a pessoa marca/desmarca a churrasqueira na tela.
+    Recebe so os nomes dos ambientes (nao precisa ler o PDF de novo)."""
+    amb = [{"nome": n, "area": 0.0} for n in json.loads(nomes_json)]
+    return json.dumps(prancha.resumo(amb, bool(churrasqueira)), ensure_ascii=False)
+
+
 def ler(planta_b64, pagina=0, escala=None, sem_numero=True, ficha=None):
     """Passo 1: le a planta e devolve os ambientes com o acabamento sugerido.
     Nao gera PDF nenhum - e rapido e serve para a pessoa conferir antes."""
@@ -69,7 +85,10 @@ def ler(planta_b64, pagina=0, escala=None, sem_numero=True, ficha=None):
             "rotulos de ambiente visiveis - imagem escaneada ou print nao serve.")
 
     somas = prancha.areas(P["amb"])
+    churras = prancha.tem_churrasqueira(P["amb"], _textos(P))
     return json.dumps({
+        "churrasqueira": churras,
+        "caracteristicas": prancha.resumo(P["amb"], churras),
         "escala": round(P["escala"]),
         "confiavel": bool(P["confiavel"]),
         "ambientes": ambientes,
@@ -82,9 +101,17 @@ def ler(planta_b64, pagina=0, escala=None, sem_numero=True, ficha=None):
 
 def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
           escala=None, pisos=None, apelidos=None, timbrado_b64=None,
-          construida=None, quintal=None, sem_numero=True, ficha=None):
+          construida=None, quintal=None, sem_numero=True, ficha=None,
+          caracteristicas=None, churrasqueira=None, telhado="revit",
+          estilo="viva"):
     """Passo 2: monta a prancha e devolve o PDF em base64.
-    `pisos` e `apelidos` sao os ajustes que a pessoa fez na tabela."""
+    `pisos` e `apelidos` sao os ajustes que a pessoa fez na tabela;
+    `caracteristicas` e a descricao como ela deixou na caixa de texto
+    (lista de linhas, ou texto com uma linha por item)."""
+    if isinstance(caracteristicas, str):
+        caracteristicas = [l for l in caracteristicas.splitlines() if l.strip()]
+    elif caracteristicas is not None:
+        caracteristicas = [str(l) for l in caracteristicas]
     cam = _preparar_arquivos(planta_b64, fachada_b64, timbrado_b64)
     docx = cam.get("timbrado") or os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
@@ -102,12 +129,17 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
     # alta resolucao, isso cabe na memoria do navegador.
     dpi_saida = int(min(600, max(420, P["dpi"] * 1.25)))
     img, etiquetas = humanizar.desenhar(P, dpi_saida=dpi_saida,
+                                        paleta="viva" if estilo == "viva" else "neutra",
                                         override=pisos or {})
+    textos = _textos(P)
     saida = os.path.join(TMP, "PRANCHA.pdf")
     prancha.montar(img, cam["fachada"], P["amb"], titulo, saida,
                    area_lote=lote, timbrado=fundo,
                    area_construida=construida, area_quintal=quintal,
-                   pecas=pecas, etiquetas=etiquetas)
+                   pecas=pecas, etiquetas=etiquetas,
+                   caracteristicas=caracteristicas or None,
+                   churrasqueira=churrasqueira, textos=textos,
+                   telhado=telhado or "revit")
 
     with open(saida, "rb") as f:
         pdf = base64.b64encode(f.read()).decode()
@@ -126,7 +158,7 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
         "confiavel": bool(P["confiavel"]),
         "conferencia": conferencia,
         "via_ficha": bool(P.get("via_ficha")),
-        "caracteristicas": prancha.resumo(P["amb"]),
+        "caracteristicas": caracteristicas or prancha.resumo(P["amb"], churrasqueira, textos),
         "areas": {k: round(v, 2) for k, v in
                   prancha.areas(P["amb"], lote, construida, quintal).items()},
     }, ensure_ascii=False)

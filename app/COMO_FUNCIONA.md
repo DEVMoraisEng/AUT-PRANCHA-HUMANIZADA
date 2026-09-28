@@ -65,7 +65,7 @@ sem avisar.
 | `extract.py`   | lê rótulos, áreas e coordenadas do PDF |
 | `segmentar.py` | reconstrói a região de cada ambiente (Dijkstra com cota de área) |
 | `pipeline.py`  | junta leitura + escala + segmentação + conferência (sem ficha) |
-| `humanizar.py` | repinta a planta (pisos, paredes, vegetação, móveis em bloco) e devolve onde cada etiqueta cabe |
+| `humanizar.py` | repinta a planta (pisos, paredes, vegetação, móveis renderizados) e devolve onde cada etiqueta cabe |
 | `fachada.py`   | trata a perspectiva 3D (tons, fundo, sombra de apoio) |
 | `prancha.py`   | monta a folha A4 no timbrado |
 | `timbrado.py`  | extrai a arte de fundo do `.docx` |
@@ -119,26 +119,54 @@ Portas e janelas viram **soleira**: o programa fecha o vão com uma barreira
 virtual, então o piso de um ambiente nunca vaza para o vizinho por baixo de uma
 janela. O acabamento troca exatamente na soleira.
 
-## Aparência
+## Aparência (estilo "viva", padrão desde 28/09/2026)
 
-A planta sai **neutra**: os ambientes se distinguem pela textura e pelo tom,
-não pela cor. Não há contorno nem sombra em volta dos cômodos — só a parede.
+A planta sai com cara de **planta renderizada**: porcelanato 50x50 com
+variação de tom por peça, grama de jardim, concreto com textura, paredes
+brancas com contorno grafite, sombra projetada da parede e sombreamento no pé
+da parede. `--estilo sobria` volta ao visual antigo (neutro, parede azul).
 
-O nome e a área ficam **sem tarja**, posicionados no ponto mais folgado de cada
-ambiente (longe de parede, móvel e louça), com um contorno claro leve para
-não sumir na textura. Nome grande em cômodo pequeno encolhe e, se precisar,
-quebra em duas linhas.
+O nome e a área ficam **sem fundo nenhum** (transparente), no ponto mais
+folgado de cada ambiente. Nome que não cabe sai para a margem com linha de
+chamada.
 
-A perspectiva 3D também é tratada: os tons do Revit passam por uma rampa quente,
-o preto duro vira grafite, o fundo branco vira um degradê suave com sombra de
-apoio embaixo da casa, dissolvida nas bordas para não deixar emenda no timbrado.
-Para usar o 3D cru: `--fachada-crua`.
+### Mobiliário
 
-## Mobiliário
+Cada peça do projeto é **renderizada** na posição e no tamanho do projeto:
+o programa descobre o que ela é pelo ambiente + medidas (cama, armário,
+estofado, bancada, louça, carro, mesa) e aplica material (tecido, madeira,
+pedra, louça, pintura), volume por pedaço fechado pelo desenho (travesseiro,
+assento, porta) e sombra no piso. Peça que o Revit já pintou (sofá marrom,
+TV azul) mantém a cor do projeto e só ganha volume. Nada é inventado ou movido.
 
-O mobiliário aparece **como está no projeto**: o traço original é preservado,
-só entra mais leve para não pesar na folha. Nenhum móvel é inventado, movido
-ou substituído por bloco de biblioteca.
+A pegada da peça conta a PAREDE como lado (armário e bancada encostados só
+têm três lados desenhados), mas miolo que ocupa mais da metade do cômodo, que
+tem forma torta ou que é o quarto de círculo do arco da porta não vira móvel.
+Tabela de materiais: `humanizar.MATERIAL`; classificação: `humanizar._classe`.
+
+### Perspectiva 3D
+
+Estilo viva: parede em branco quente, telhado no tom escolhido
+(`--telhado revit|ceramica|grafite`), vão escuro vira vidro, o que já tinha
+cor (tijolo, madeira) fica mais vivo, céu em degradê atrás e sombra de apoio.
+Mesma geometria. **Render pronto em JPG/PNG** (Enscape, Lumion, Revit
+Realista) entra como veio — só recorta a margem. É o caminho para o 3D ficar
+realmente realista: recolorir o 3D chapado do Revit tem limite.
+
+## Descrição (características)
+
+`prancha.resumo()` monta a descrição a partir dos nomes dos ambientes:
+quartos/suítes, banheiros (+ lavabo), sala e cozinha integradas, gourmet
+("GARAGEM GOURMET COM CHURRASQUEIRA", "COM ÁREA GOURMET E CHURRASQUEIRA",
+"ÁREA DE SERVIÇO E GOURMET COM CHURRASQUEIRA"), área de serviço independente,
+garagem coberta/descoberta, varanda, jardim de inverno, closet, escritório,
+despensa, piscina. A churrasqueira é procurada em todo texto escrito na
+planta (no Revit ela quase nunca é ambiente) e pode ser marcada à mão.
+Na página a descrição é uma caixa de texto editável; na linha de comando,
+`--caracteristica "..."` (uma por linha) substitui a automática.
+
+O **quadro de ambientes saiu** da prancha em 28/09 — as áreas já estão
+escritas na planta.
 
 ## Nome na peça de venda
 
@@ -166,3 +194,4 @@ sempre com a mesma quantidade de pixels por metro. Se avisar que não confia
 - Botões do Revit: `../revit/MoraisEng.extension/lib/morais_eng/passos.py`
 - Cores da marca: `NAVY`, `PETROL`, `MINT` em `humanizar.py` e `prancha.py`
 - Posição dos blocos na folha: `prancha.montar()`
+- Cores do 3D: `fachada.TELHADOS`, `PAREDE_SOMBRA/LUZ`, `CEU_TOPO/BASE`

@@ -12,7 +12,7 @@ O que ele faz, nesta ordem:
     ficou fora da tolerancia;
  4. repinta a planta (piso por material, paredes na cor da marca, vegetacao),
     preservando 100% do mobiliario e das loucas do projeto original;
- 5. monta planta + fachada + caracteristicas + quadro de areas no papel
+ 5. monta planta + fachada + caracteristicas + resumo de areas no papel
     timbrado da empresa e grava o PDF final.
 
 Nada e inventado: todo texto e todo numero da prancha sai do arquivo de entrada.
@@ -55,6 +55,16 @@ def main():
                    help="o .json de cores gravado pelo botao Planta Humanizada do "
                         "pyRevit. Com ele o programa LE os ambientes (cor por cor) "
                         "em vez de deduzir os limites pelo desenho")
+    p.add_argument("--caracteristica", action="append", default=[], metavar="TEXTO",
+                   help='substitui a descricao automatica; repita uma vez por linha, ex: '
+                        '--caracteristica "3 QUARTOS SENDO 1 SUITE"')
+    p.add_argument("--churrasqueira", action="store_true", default=None,
+                   help="forca 'com churrasqueira' na descricao (sem a flag, procura "
+                        "a palavra CHURRASQUEIRA na planta)")
+    p.add_argument("--telhado", default="revit", choices=["revit", "ceramica", "grafite"],
+                   help="tom do telhado no 3D (padrao: o do proprio modelo)")
+    p.add_argument("--estilo", default="viva", choices=["viva", "sobria"],
+                   help="viva = planta renderizada (padrao); sobria = visual antigo")
     p.add_argument("--relatorio", default=None)
     a = p.parse_args()
 
@@ -102,12 +112,20 @@ def main():
         print(f"  {nome:<28}{mat}")
 
     dpi_saida = int(min(600, max(420, P["dpi"] * 1.25)))
-    img, etiquetas = humanizar.desenhar(P, dpi_saida=dpi_saida, override=override)
+    img, etiquetas = humanizar.desenhar(
+        P, dpi_saida=dpi_saida, override=override,
+        paleta="viva" if a.estilo == "viva" else "neutra")
+    textos = [w[4] for w in P["page"].get_text("words")]
+    carac = a.caracteristica or prancha.resumo(P["amb"], a.churrasqueira, textos)
+    print("\nCARACTERISTICAS (mude com --caracteristica, uma por linha)")
+    for ln in carac:
+        print("  -", ln)
     prancha.montar(img, a.fachada, P["amb"], a.titulo, a.saida,
                    area_lote=a.lote, timbrado=fundo,
                    humanizar_3d=not a.fachada_crua,
                    area_construida=a.construida, area_quintal=a.quintal,
-                   pecas=pecas, etiquetas=etiquetas)
+                   pecas=pecas, etiquetas=etiquetas, caracteristicas=carac,
+                   telhado=a.telhado)
     print(f"\nprancha gravada em {a.saida}")
 
     if a.relatorio:

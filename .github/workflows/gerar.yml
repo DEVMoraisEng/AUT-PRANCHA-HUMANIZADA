@@ -13,12 +13,12 @@ on:
         description: 'Área do lote em m² (dado de matrícula; deixe vazio se não souber)'
         required: false
         default: ''
-      moveis:
-        description: 'Mobiliário'
+      telhado:
+        description: 'Telhado no 3D'
         required: true
-        default: 'traco'
+        default: 'revit'
         type: choice
-        options: [traco, blocos]
+        options: [revit, ceramica, grafite]
       escala:
         description: 'Forçar escala (ex: 100). Vazio = detecta sozinho'
         required: false
@@ -54,7 +54,7 @@ jobs:
             --fachada  ../entrada/3D.pdf \
             --timbrado "Modelo_papel_timbrado__Morais_Engenharia.docx" \
             --titulo   "${{ inputs.titulo }}" \
-            --moveis   "${{ inputs.moveis }}" \
+            --telhado  "${{ inputs.telhado }}" \
             ${{ inputs.lote   != '' && format('--lote {0}',   inputs.lote)   || '' }} \
             ${{ inputs.escala != '' && format('--escala {0}', inputs.escala) || '' }} \
             --relatorio ../PRANCHA_conferencia.json \

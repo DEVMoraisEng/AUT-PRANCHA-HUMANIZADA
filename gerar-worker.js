@@ -82,6 +82,12 @@ onmessage = async (e) => {
       return;
     }
 
+    if (m.tipo === "descrever") {
+      const r = api.descrever(JSON.stringify(m.nomes || []), !!m.churrasqueira);
+      postMessage({ tipo: "descricao", linhas: JSON.parse(r) });
+      return;
+    }
+
     if (m.tipo === "gerar") {
       aviso(m.ficha ? "Lendo os ambientes pela ficha do Revit…"
                     : "Reconstruindo os ambientes…", 25);
@@ -90,7 +96,9 @@ onmessage = async (e) => {
         m.pagina || 0, m.escala || null,
         pyodide.toPy(m.pisos || {}), pyodide.toPy(m.apelidos || {}),
         m.timbrado || null, m.construida || null, m.quintal || null,
-        !!m.semNumero, m.ficha || null
+        !!m.semNumero, m.ficha || null,
+        m.caracteristicas == null ? null : String(m.caracteristicas),
+        !!m.churrasqueira, m.telhado || "revit", "viva"
       );
       aviso("Montando a prancha…", 92);
       postMessage({ tipo: "gerado", dados: JSON.parse(r) });

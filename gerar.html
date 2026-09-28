@@ -62,6 +62,16 @@ td select,td input{padding:5px 7px;font-size:12.5px}
 pre{background:var(--azul-esc);color:#ffd9d4;border-radius:8px;padding:12px 14px;
  overflow-x:auto;font-size:12px}
 embed{width:100%;height:640px;border:1px solid var(--border2);border-radius:8px;margin-top:12px}
+textarea{width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;
+  font-family:inherit;font-size:13.5px;color:var(--text);background:#fff;resize:vertical;line-height:1.6}
+textarea:focus{outline:2px solid var(--teal);outline-offset:-1px}
+label.check{display:flex;align-items:center;gap:8px;font-size:14px;text-transform:none;
+  letter-spacing:0;color:var(--text);font-weight:600;margin-top:18px;cursor:pointer}
+label.check input{width:auto}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chips button{border:1px solid var(--border);background:var(--bg2);color:var(--azul);border-radius:20px;
+  padding:4px 10px;font-family:inherit;font-size:11.5px;font-weight:600;cursor:pointer}
+.chips button:hover{border-color:var(--verde);background:#f0faf4}
 footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
 </style>
 
@@ -87,12 +97,12 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
       </div>
       <div class="solta" id="s-fachada">
         <b id="n-fachada">Fachada 3D</b>
-        <span>clique ou arraste o PDF</span>
+        <span>PDF do Revit ou render (JPG/PNG)</span>
       </div>
     </div>
     <input type="file" id="f-planta" accept="application/pdf" class="esconde">
     <input type="file" id="f-ficha" accept="application/json,.json" class="esconde">
-    <input type="file" id="f-fachada" accept="application/pdf" class="esconde">
+    <input type="file" id="f-fachada" accept="application/pdf,image/png,image/jpeg,image/webp" class="esconde">
     <div class="aviso"><b>A ficha de cores muda o jogo.</b> Sem ela o programa
       <i>deduz</i> onde termina cada cômodo olhando o desenho — e erra em planta
       com vão aberto. Com ela ele <i>lê</i>: quem pinta cada ambiente é o próprio
@@ -119,8 +129,30 @@ footer{color:var(--text3);font-size:12px;text-align:center;padding:16px 0 34px}
       vale o que você digitou. A linha do lote só aparece se for preenchida.</div>
   </div>
 
+  <div class="card esconde" id="c-descricao">
+    <h2>3 · Descrição e 3D</h2>
+    <div class="campos" style="grid-template-columns:1fr 1fr">
+      <label class="check"><input type="checkbox" id="churras"> Tem churrasqueira</label>
+      <div><label>Telhado no 3D</label>
+        <select id="telhado">
+          <option value="revit">Como está no Revit</option>
+          <option value="ceramica">Telha cerâmica</option>
+          <option value="grafite">Grafite</option>
+        </select></div>
+    </div>
+    <div class="aviso" id="aviso-churras" style="margin-bottom:12px"></div>
+    <label>Características (uma por linha — é exatamente o que vai na prancha)</label>
+    <textarea id="carac" rows="7"></textarea>
+    <div class="chips" id="chips"></div>
+    <div class="aviso">A descrição sai dos nomes dos ambientes da planta: sem ambiente
+      GOURMET não aparece "gourmet". Marcar a churrasqueira refaz a caixa; o que você
+      digitar à mão vale até você marcar/desmarcar de novo. Os botões acima só
+      acrescentam a linha.<br>O telhado só muda a cor do 3D do Revit. Se você mandar
+      um <b>render em imagem</b>, ele entra como veio.</div>
+  </div>
+
   <div class="card esconde" id="c-ambientes">
-    <h2>3 · Confira os ambientes</h2>
+    <h2>4 · Confira os ambientes</h2>
     <p style="font-size:13.5px">Nome, área e posição saem do próprio arquivo. O que você
       decide aqui é o <b>acabamento do piso</b> e o <b>nome que vai na peça de venda</b>.</p>
     <div class="aviso" id="aviso-metodo"></div>
@@ -184,12 +216,13 @@ w.onmessage = ({ data: m }) => {
   if (m.tipo === "andamento") { status(m.texto); barra(m.pct); }
   else if (m.tipo === "pronto") { pronto = true; status("Pronto. Solte os arquivos do Revit acima."); barra(100); liberar(); tentarLer(); }
   else if (m.tipo === "leitura") {
-    leitura = m.dados; pintarAmbientes();
+    leitura = m.dados; pintarAmbientes(); pintarDescricao();
     if (!$("construida").value) $("construida").placeholder = fmt(m.dados.sugestao_construida);
     if (!$("quintal").value) $("quintal").placeholder = fmt(m.dados.sugestao_quintal);
     status("Ambientes lidos. Confira a tabela e clique em Gerar."); barra(100); liberar();
   }
   else if (m.tipo === "gerado") { entregar(m.dados); }
+  else if (m.tipo === "descricao") { $("carac").value = m.linhas.join("\n"); }
   else if (m.tipo === "erro") {
     status(m.texto, true);
     if (m.detalhe) { $("detalhe").textContent = m.detalhe; $("c-detalhe").classList.remove("esconde"); }
@@ -217,7 +250,11 @@ async function receber(qual, f) {
     arq.ficha = txt;
     $("tag-ficha").textContent = "lendo do Revit";
   } else {
-    if (f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)) { status("Só PDF, por favor.", true); return; }
+    const ehPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+    const ehImg = /^image\/(png|jpeg|webp)$/.test(f.type) || /\.(png|jpe?g|webp)$/i.test(f.name);
+    if (!ehPdf && !(qual === "fachada" && ehImg)) {
+      status(qual === "fachada" ? "A fachada vai em PDF do Revit ou em imagem (JPG/PNG) de render."
+                                : "A planta vai em PDF, por favor.", true); return; }
     const b = new Uint8Array(await f.arrayBuffer());
     let s = ""; const bloco = 0x8000;
     for (let i = 0; i < b.length; i += bloco) s += String.fromCharCode.apply(null, b.subarray(i, i + bloco));
@@ -278,6 +315,34 @@ function pintarAmbientes() {
     : `<div class="aviso alerta">Não consegui confirmar a escala (a planta tem poucos ambientes rotulados). Confira as áreas antes de usar a prancha.</div>`;
 }
 
+/* ---------- descricao ---------- */
+const CHIPS = ["COM ÁREA GOURMET E CHURRASQUEIRA", "GARAGEM GOURMET COM CHURRASQUEIRA",
+  "SALA E COZINHA INTEGRADAS", "ÁREA DE SERVIÇO INDEPENDENTE", "JARDIM DE INVERNO",
+  "COM CHURRASQUEIRA", "QUINTAL"];
+function pintarDescricao() {
+  $("churras").checked = !!leitura.churrasqueira;
+  $("aviso-churras").innerHTML = leitura.churrasqueira
+    ? "<b>Churrasqueira encontrada</b> — a palavra aparece escrita na planta."
+    : "Não achei a palavra <b>churrasqueira</b> escrita na planta. Se a casa tem, marque acima.";
+  $("carac").value = (leitura.caracteristicas || []).join("\n");
+  const cx = $("chips"); cx.innerHTML = "";
+  for (const t of CHIPS) {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = "+ " + t;
+    b.onclick = () => {
+      const ls = $("carac").value.split("\n").map(s => s.trim()).filter(Boolean);
+      if (!ls.includes(t)) ls.push(t);
+      $("carac").value = ls.join("\n");
+    };
+    cx.appendChild(b);
+  }
+  $("c-descricao").classList.remove("esconde");
+}
+$("churras").onchange = () => {
+  if (!leitura) return;
+  w.postMessage({ tipo: "descrever", nomes: leitura.ambientes.map(a => a.nome),
+                  churrasqueira: $("churras").checked });
+};
+
 function coletar(attr) {
   const o = {};
   document.querySelectorAll(`[data-${attr}]`).forEach(el => { o[el.dataset[attr]] = el.value; });
@@ -297,6 +362,9 @@ $("b-gerar").onclick = () => {
     construida: num("construida"), quintal: num("quintal"),
     semNumero: true,
     pisos: coletar("piso"), apelidos: coletar("nome"),
+    caracteristicas: leitura ? $("carac").value : null,
+    churrasqueira: $("churras").checked,
+    telhado: $("telhado").value,
   });
 };
 

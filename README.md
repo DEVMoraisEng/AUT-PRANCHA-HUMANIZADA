@@ -1,7 +1,8 @@
 # AUT-PRANCHA-HUMANIZADA
 
-Gera a prancha de venda (planta humanizada + fachada 3D + quadro de áreas) no
-papel timbrado da Morais, a partir do PDF vetorial que sai do Revit.
+Gera a prancha de venda (planta humanizada renderizada + fachada 3D +
+características + resumo de áreas) no papel timbrado da Morais, a partir do
+PDF vetorial que sai do Revit. A fachada também aceita render pronto em JPG/PNG.
 
 **Gerar:** https://devmoraiseng.github.io/AUT-PRANCHA-HUMANIZADA/gerar.html
 

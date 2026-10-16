@@ -13,7 +13,7 @@ const CDNS = [
 
 const MODULOS = ["extract.py", "segmentar.py", "pipeline.py", "humanizar.py",
                  "fachada.py", "prancha.py", "timbrado.py", "nomes.py",
-                 "cores.py", "api.py"];
+                 "cores.py", "render.py", "api.py"];
 const BINARIOS = ["fontes/DejaVuSans.ttf", "fontes/DejaVuSans-Bold.ttf",
                   "Modelo_papel_timbrado__Morais_Engenharia.docx"];
 

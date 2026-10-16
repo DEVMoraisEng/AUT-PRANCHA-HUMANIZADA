@@ -147,11 +147,22 @@ class Tela(object):
         X1, Y1 = min(self.W, int(math.ceil(max(xs))) + 2), min(self.H, int(math.ceil(max(ys))) + 2)
         if X1 <= X0 or Y1 <= Y0:
             return out
-        im = Image.new('L', ((X1 - X0) * ss, (Y1 - Y0) * ss), 0)
-        d = ImageDraw.Draw(im)
-        for i, pp in enumerate(todos):
-            q = [((x - X0) * ss, (y - Y0) * ss) for x, y in pp]
-            d.polygon(q, fill=255 if (varios or i == 0 or not preencher) else 0)
+        tam = ((X1 - X0) * ss, (Y1 - Y0) * ss)
+        if varios or len(todos) == 1:
+            im = Image.new('L', tam, 0)
+            d = ImageDraw.Draw(im)
+            for pp in todos:
+                d.polygon([((x - X0) * ss, (y - Y0) * ss) for x, y in pp], fill=255)
+            acc = np.asarray(im) > 127
+        else:
+            # par-ímpar: furo dentro do anel some; anéis separados (faces
+            # diferentes do mesmo piso) somam
+            acc = np.zeros((tam[1], tam[0]), bool)
+            for pp in todos:
+                im = Image.new('1', tam, 0)
+                ImageDraw.Draw(im).polygon([((x - X0) * ss, (y - Y0) * ss) for x, y in pp], fill=1)
+                acc ^= np.asarray(im, bool)
+        im = Image.fromarray((acc * 255).astype(np.uint8), 'L')
         if ss > 1:
             im = im.resize((X1 - X0, Y1 - Y0), Image.BOX)
         out[Y0:Y1, X0:X1] = np.asarray(im, np.float32) / 255.0
@@ -231,6 +242,63 @@ def classificar_piso(texto, nome_ambiente=u''):
         if re.search(rx, n):
             return mat, tam, False
     return 'concreto', tam, False
+
+
+def _dentro(x, y, anel):
+    d = False
+    n = len(anel)
+    for i in range(n):
+        x0, y0 = anel[i]
+        x1, y1 = anel[(i + 1) % n]
+        if (y0 > y) != (y1 > y) and x < x0 + (y - y0) * (x1 - x0) / ((y1 - y0) or 1e-12):
+            d = not d
+    return d
+
+
+def _ponto_interno(aneis):
+    """Um ponto DENTRO do ambiente (o centro de um L pode cair fora)."""
+    a0 = aneis[0]
+    xs = [p[0] for p in a0]
+    ys = [p[1] for p in a0]
+    melhor = None
+    for fy in (0.5, 0.35, 0.65, 0.2, 0.8):
+        y = min(ys) + (max(ys) - min(ys)) * fy
+        for fx in (0.5, 0.35, 0.65, 0.2, 0.8):
+            x = min(xs) + (max(xs) - min(xs)) * fx
+            if sum(1 for r in aneis if _dentro(x, y, r)) % 2 == 1:
+                return x, y
+            if melhor is None:
+                melhor = (x, y)
+    return melhor
+
+
+def material_do_ambiente(amb, pisos=None):
+    """Acabamento do ambiente → (material, placa). Ordem:
+    1. nome que manda (ÁREA PERMEÁVEL / JARDIM / GRAMA = grama);
+    2. o PISO modelado que está embaixo do ambiente (revestimento ganha do
+       contrapiso);
+    3. o texto que o Revit gravou para o ambiente;
+    4. a regra pelo nome."""
+    nome = norm(amb.get('nome', ''))
+    if re.search(r'PERMEAVEL|GRAMA|GRAMADO|JARDIM(?! DE INVERNO)|CANTEIRO', nome):
+        return 'grama', None
+    cont = amb.get('contorno') or []
+    if pisos and cont:
+        pt = _ponto_interno(cont)
+        achados = []
+        for p in pisos:
+            aneis = p.get('contorno') or []
+            if pt and sum(1 for r in aneis if _dentro(pt[0], pt[1], r)) % 2 == 1:
+                mat, tam, expl = classificar_piso(p.get('texto', ''))
+                if expl:
+                    achados.append((mat, tam))
+        acab = [a for a in achados if a[0] not in ('concreto',)]
+        if acab:
+            return acab[-1]
+        if achados:
+            return achados[-1]
+    mat, tam, expl = classificar_piso(amb.get('piso', ''), amb.get('nome', ''))
+    return mat, tam
 
 
 def _placas(tela, caixa, larg, comp, junta, base, varia, rng, desloc=0.0, veio=0.0):
@@ -846,7 +914,16 @@ LUZ = (1.0, -1.35)        # sombra vai para a direita e para baixo na folha
 
 
 def _limites(ficha):
+    """Enquadramento: os AMBIENTES (com folga para o muro e a calçada). Parede
+    que o recorte da vista pegou do vizinho não alarga a folha."""
     xs, ys = [], []
+    for a in ficha.get('ambientes') or []:
+        for anel in a.get('contorno') or []:
+            for x, y in anel:
+                xs.append(x)
+                ys.append(y)
+    if xs:
+        return min(xs) - 0.2, min(ys) - 0.2, max(xs) + 0.2, max(ys) + 0.2
     for chave in ('lote', 'paredes'):
         for anel in ficha.get(chave) or []:
             for x, y in anel:
@@ -970,8 +1047,16 @@ def _desenhar_sprite(nome, W, D, k, rng, o, tela):
     elif nome == 'bancada':
         poli = None
         cont = o.get('contorno')
-        if cont and _area_anel(cont[0]) < 0.6 * (o.get('largura') or 0) * (o.get('fundo') or 0):
-            cont = None                       # face pequena (frontão, torneira): usa a pegada
+        if cont:
+            # o contorno do tampo só vale para bancada em L/U: tampo retangular
+            # sai pela pegada (a face de cima costuma ser menor que a peça e
+            # deixava um vão entre a bancada e a parede)
+            xs_ = [p[0] for p in cont[0]]
+            ys_ = [p[1] for p in cont[0]]
+            caixa_ = (max(xs_) - min(xs_)) * (max(ys_) - min(ys_)) or 1.0
+            a_ = _area_anel(cont[0])
+            if a_ / caixa_ > 0.9 or a_ < 0.6 * (o.get('largura') or 0) * (o.get('fundo') or 0):
+                cont = None
         if cont:
             # contorno real (bancada em L) no referencial do sprite
             poli = _contorno_no_sprite(o, cont[0], Wp, Dp)
@@ -1084,7 +1169,7 @@ def renderizar(ficha, px_m=None, max_px=5200, margem_m=0.25, rotulos=True, fonte
     # ── 3. ambientes pelo acabamento
     amb_alfa = []
     for i, amb in enumerate(ficha.get('ambientes') or []):
-        mat, tam, expl = classificar_piso(amb.get('piso', ''), amb.get('nome', ''))
+        mat, tam = material_do_ambiente(amb, ficha.get('pisos'))
         nn = norm(amb.get('nome', '')).strip()
         if nn in over and over[nn] in PALETA:
             mat = over[nn]

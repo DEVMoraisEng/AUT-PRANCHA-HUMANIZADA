@@ -17,7 +17,7 @@ try:
 except Exception:          # sem o modulo novo o gerador continua no caminho antigo
     render = None
 
-ACABAMENTOS_RENDER = ["porcelanato", "ceramica", "madeira", "pedra", "concreto", "grama", "deck", "brita"]
+ACABAMENTOS_RENDER = ["porcelanato", "ceramica", "madeira", "pedra", "concreto", "pintado", "grama", "deck", "brita"]
 
 TMP = "/tmp/prancha"
 
@@ -35,6 +35,31 @@ def _preparar_arquivos(planta_b64, fachada_b64, timbrado_b64=None):
             f.write(base64.b64decode(dados))
         cam[chave] = p
     return cam
+
+
+def _preparar_v4(caminho, fv4, pagina, apelidos):
+    """Ficha v4: nome, area e contorno ja vem do Revit - nao precisa ler a
+    cor do PDF (que era o passo mais lento: ~1 min no navegador). O PDF so
+    serve para os textos (churrasqueira escrita na planta)."""
+    page = None
+    try:
+        import pymupdf
+        page = pymupdf.open(caminho)[pagina]
+    except Exception:
+        pass
+    amb = []
+    for it in fv4.get("ambientes") or []:
+        area = float(it.get("area") or 0.0)
+        nome = it.get("nome") or "AMBIENTE"
+        amb.append({"nome": nome, "area": area, "lido": area, "medido": area, "erro": 0.0,
+                    "x": 0.0, "y": 0.0, "cor": it.get("cor"),
+                    "rotulo": nomes.bonito(nome, apelidos or {}, True),
+                    "confiavel": True, "celula_ok": True, "motivo": ""})
+    if not amb:
+        raise ValueError("A ficha (.json) nao tem ambientes. No Revit, coloque os ambientes "
+                         "(Arquitetura > Ambiente) na planta e rode o Exportar Tudo de novo.")
+    return dict(page=page, amb=amb, escala=float(fv4.get("escala") or 50), confiavel=True,
+                dpi=150, via_ficha=True, render=True)
 
 
 def _preparar(caminho, pagina, escala, apelidos, sem_numero, ficha_txt):
@@ -88,6 +113,8 @@ def _textos(P):
     """Todo texto escrito na planta - e dali que sai a churrasqueira, que no
     Revit quase nunca e ambiente."""
     try:
+        if P.get("page") is None:
+            return []
         return [w[4] for w in P["page"].get_text("words")]
     except Exception:
         return []
@@ -104,14 +131,15 @@ def ler(planta_b64, pagina=0, escala=None, sem_numero=True, ficha=None):
     """Passo 1: le a planta e devolve os ambientes com o acabamento sugerido.
     Nao gera PDF nenhum - e rapido e serve para a pessoa conferir antes."""
     cam = _preparar_arquivos(planta_b64, None)
-    P = _preparar(cam["planta"], pagina, escala, None, sem_numero, ficha)
     fv4 = _ficha_v4(ficha)
+    P = (_preparar_v4(cam["planta"], fv4, pagina, None) if fv4 else
+         _preparar(cam["planta"], pagina, escala, None, sem_numero, ficha))
     pares = _par_da_ficha(fv4, P["amb"]) if fv4 else {}
     ambientes = []
     for a in P["amb"]:
         if fv4:
             f = pares.get(id(a)) or {}
-            acab = render.classificar_piso(f.get("piso", ""), a["nome"])[0]
+            acab = render.material_do_ambiente(f or {"nome": a["nome"]}, fv4.get("pisos"))[0]
         else:
             acab = humanizar.material_de(a["nome"])
         ambientes.append({
@@ -169,13 +197,14 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
     except Exception:
         pecas = None
 
-    P = _preparar(cam["planta"], pagina, escala, apelidos, sem_numero, ficha)
+    fv4 = _ficha_v4(ficha)
+    P = (_preparar_v4(cam["planta"], fv4, pagina, apelidos) if fv4 else
+         _preparar(cam["planta"], pagina, escala, apelidos, sem_numero, ficha))
     # A saida e rasterizada acima da resolucao de analise: abaixo dela o
     # desenho ja chegaria reduzido na folha, e reduzir traco fino e o que
     # produz o efeito de borrado. Como so o recorte do desenho vai para a
     # alta resolucao, isso cabe na memoria do navegador.
     dpi_saida = int(min(600, max(420, P["dpi"] * 1.25)))
-    fv4 = _ficha_v4(ficha)
     img = etiquetas = None
     if fv4:
         # ficha v4: a planta e DESENHADA a partir do Revit (paredes, portas,
@@ -212,6 +241,9 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
             print("render falhou, usando o PDF:", ex)
             img = etiquetas = None
     if img is None:
+        if P.get("render"):          # o desenho novo falhou: volta a ler o PDF pela cor
+            P = _preparar(cam["planta"], pagina, escala, apelidos, sem_numero, ficha)
+            dpi_saida = int(min(600, max(420, P["dpi"] * 1.25)))
         img, etiquetas = humanizar.desenhar(P, dpi_saida=dpi_saida,
                                             paleta="viva" if estilo == "viva" else "neutra",
                                             override=pisos or {})

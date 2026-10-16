@@ -236,7 +236,8 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
                     continue
                 etiquetas.append({"nome": nome, "area": float(e.get("area") or 0), "x": e["x"], "y": e["y"],
                                   "vao": max(4.0, 2 * e.get("meia_larg", e["folga_px"])),
-                                  "raio": max(2.0, e.get("meia_alt", e["folga_px"])), "confiavel": True})
+                                  "raio": max(2.0, e.get("meia_alt", e["folga_px"])), "confiavel": True,
+                                  "livre": e.get("livre"), "livre2": e.get("livre2")})
         except Exception as ex:          # qualquer falha: volta ao caminho do PDF
             print("render falhou, usando o PDF:", ex)
             img = etiquetas = None

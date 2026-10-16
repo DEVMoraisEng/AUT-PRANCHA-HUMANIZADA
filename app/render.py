@@ -1384,8 +1384,34 @@ def renderizar(ficha, px_m=None, max_px=5200, margem_m=0.25, rotulos=True, fonte
             d.line([tela.p(*a), tela.p(*b)], fill=(80, 80, 82, 255), width=max(1, int(0.01 * k)))
 
     # ── 11. lugar das etiquetas (miolo livre do ambiente)
+    # ocupado = pegada de TODO móvel/louça + giro das portas: o nome e a área
+    # não podem cair em cima da cama, da máquina ou do arco da porta
+    oc = Image.new('L', (W, H), 0)
+    do = ImageDraw.Draw(oc)
+    op_ = Image.new('L', (W, H), 0)               # só o giro das portas
+    dp_ = ImageDraw.Draw(op_)
+    for camada, nome, o, sprite, margem in pend:
+        if camada >= 1 and o.get('cantos'):       # tapete (0) pode ter texto por cima
+            do.polygon([tela.p(*c_) for c_ in o['cantos']], fill=255)
+    for po in ficha.get('portas') or []:
+        for arc in (po.get('arcos') or [])[:2]:
+            try:
+                h = np.array(arc['centro'], float)
+                pa, pb = np.array(arc['p0'], float) - h, np.array(arc['p1'], float) - h
+                r_ = float(arc.get('raio') or np.linalg.norm(pa))
+                a0, a1 = np.arctan2(pa[1], pa[0]), np.arctan2(pb[1], pb[0])
+                da = (a1 - a0 + np.pi) % (2 * np.pi) - np.pi
+                angs = a0 + da * np.linspace(0, 1, 12)
+                giro = [tela.p(*h)] + [tela.p(h[0] + r_ * np.cos(t_), h[1] + r_ * np.sin(t_))
+                                       for t_ in angs]
+                do.polygon(giro, fill=255)
+                dp_.polygon(giro, fill=255)
+            except Exception:
+                pass
+    ocupado = np.asarray(oc) > 0
+    porta_giro = np.asarray(op_) > 0
     etiquetas = []
-    livre_mov = sombra_mov < 0.3
+    livre_mov = (sombra_mov < 0.3) & ~ocupado
     for amb, a, mat in amb_alfa:
         m = (a > 0.5) & livre_mov
         if m.sum() < 20:
@@ -1409,7 +1435,28 @@ def renderizar(ficha, px_m=None, max_px=5200, margem_m=0.25, rotulos=True, fonte
             return a_, b_
         ha, hb = _corrida(lin, ix)
         va, vb = _corrida(col, iy)
+        # mapas do miolo, reduzidos — a prancha procura neles um lugar onde o
+        # bloco de texto caiba INTEIRO:
+        #   'livre'  = chão sem móvel nem giro de porta (preferido)
+        #   'livre2' = chão inteiro do ambiente menos o giro da porta (a
+        #              etiqueta tem plaquinha branca, então pode ficar sobre a
+        #              cama/o sofá quando o quarto é pequeno)
+        # os dois afastados 6 cm da parede
+        piso_ = a > 0.5
+        R0, R1, C0, C1 = _caixa(piso_.astype(np.float32), 2)
+        mg = max(1, int(round(0.06 * k)))
+        # malha pela ÁREA (não pelo lado maior): faixa comprida e fina, como o
+        # jardim lateral, não pode ficar com 12 células de largura
+        passo = max(1, int(np.ceil(np.sqrt(float(R1 - R0) * (C1 - C0)) / 200.0)))
+        mapas = {}
+        for chave, mm in (('livre', piso_ & livre_mov), ('livre2', piso_ & ~porta_giro)):
+            mm = mm[R0:R1, C0:C1]
+            if mm.sum() > 50:
+                mm = ndimage.binary_erosion(mm, iterations=mg)
+            mapas[chave] = {'r0': int(R0), 'c0': int(C0), 'passo': passo,
+                            'm': mm[::passo, ::passo].copy()}
         etiquetas.append({'nome': amb.get('nome', ''), 'area': amb.get('area'),
+                          'livre': mapas['livre'], 'livre2': mapas['livre2'],
                           'x': float((ha + hb) / 2.0), 'y': float(iy),
                           'folga_px': float(dt[iy, ix]), 'meia_larg': float(hb - ha) / 2.0 - 0.05 * k,
                           'meia_alt': float(min(dt[iy, ix] * 2.5, (vb - va) / 2.0)) - 0.05 * k, 'material': mat})

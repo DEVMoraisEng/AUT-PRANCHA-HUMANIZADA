@@ -12,6 +12,13 @@ import base64, io, json, os
 
 import pipeline, humanizar, prancha, timbrado, nomes, cores
 
+try:
+    import render
+except Exception:          # sem o modulo novo o gerador continua no caminho antigo
+    render = None
+
+ACABAMENTOS_RENDER = ["porcelanato", "ceramica", "madeira", "pedra", "concreto", "grama", "deck", "brita"]
+
 TMP = "/tmp/prancha"
 
 
@@ -45,6 +52,38 @@ def _preparar(caminho, pagina, escala, apelidos, sem_numero, ficha_txt):
                              sem_numero=sem_numero)
 
 
+def _ficha_v4(ficha_txt):
+    """Ficha com paredes (v4) → dict; senão None (fica o caminho do PDF)."""
+    if not ficha_txt or render is None:
+        return None
+    try:
+        d = cores.carregar_ficha(ficha_txt) if not isinstance(ficha_txt, dict) else ficha_txt
+    except Exception:
+        try:
+            d = json.loads(ficha_txt)
+        except Exception:
+            return None
+    return d if d.get("paredes") else None
+
+
+def _par_da_ficha(fv4, amb):
+    """Liga cada ambiente lido (P['amb']) ao da ficha: mesmo nome sem numero
+    e a area mais parecida (duas SUÍTES nao se trocam)."""
+    import re as _re
+    def chave(t):
+        return _re.sub(r"[\s\d]+$", "", render.norm(t or "")).strip()
+    livres = list(fv4.get("ambientes") or [])
+    out = {}
+    for a in amb:
+        cand = [f for f in livres if chave(f.get("nome")) == chave(a["nome"])]
+        if not cand:
+            continue
+        f = min(cand, key=lambda f: abs(float(f.get("area") or 0) - float(a["area"] or 0)))
+        livres.remove(f)
+        out[id(a)] = f
+    return out
+
+
 def _textos(P):
     """Todo texto escrito na planta - e dali que sai a churrasqueira, que no
     Revit quase nunca e ambiente."""
@@ -66,15 +105,22 @@ def ler(planta_b64, pagina=0, escala=None, sem_numero=True, ficha=None):
     Nao gera PDF nenhum - e rapido e serve para a pessoa conferir antes."""
     cam = _preparar_arquivos(planta_b64, None)
     P = _preparar(cam["planta"], pagina, escala, None, sem_numero, ficha)
+    fv4 = _ficha_v4(ficha)
+    pares = _par_da_ficha(fv4, P["amb"]) if fv4 else {}
     ambientes = []
     for a in P["amb"]:
+        if fv4:
+            f = pares.get(id(a)) or {}
+            acab = render.classificar_piso(f.get("piso", ""), a["nome"])[0]
+        else:
+            acab = humanizar.material_de(a["nome"])
         ambientes.append({
             "nome": a["nome"],
             "rotulo": a["rotulo"],
             "area": round(a["area"], 2),
             "medido": round(a["medido"], 2),
             "erro": round(a["erro"], 1),
-            "acabamento": humanizar.material_de(a["nome"]),
+            "acabamento": acab,
             "confiavel": bool(a["confiavel"]),
             "motivo": a["motivo"],
         })
@@ -92,7 +138,8 @@ def ler(planta_b64, pagina=0, escala=None, sem_numero=True, ficha=None):
         "escala": round(P["escala"]),
         "confiavel": bool(P["confiavel"]),
         "ambientes": ambientes,
-        "acabamentos": ["ceramica50", "concreto", "grama"],
+        "acabamentos": ACABAMENTOS_RENDER if fv4 else ["ceramica50", "concreto", "grama"],
+        "render": bool(fv4),
         "sugestao_construida": round(somas["ÁREA CONSTRUÍDA"], 2),
         "sugestao_quintal": round(somas["ÁREA DE QUINTAL"], 2),
         "via_ficha": bool(P.get("via_ficha")),
@@ -128,9 +175,46 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
     # produz o efeito de borrado. Como so o recorte do desenho vai para a
     # alta resolucao, isso cabe na memoria do navegador.
     dpi_saida = int(min(600, max(420, P["dpi"] * 1.25)))
-    img, etiquetas = humanizar.desenhar(P, dpi_saida=dpi_saida,
-                                        paleta="viva" if estilo == "viva" else "neutra",
-                                        override=pisos or {})
+    fv4 = _ficha_v4(ficha)
+    img = etiquetas = None
+    if fv4:
+        # ficha v4: a planta e DESENHADA a partir do Revit (paredes, portas,
+        # moveis, pisos) com textura, luz e sombra — nao repintada do PDF
+        try:
+            pares = _par_da_ficha(fv4, P["amb"])
+            over = {}
+            for a in P["amb"]:
+                f = pares.get(id(a))
+                if f and pisos and a["nome"] in pisos:
+                    over[f.get("nome")] = pisos[a["nome"]]
+            img, ets, _tela = render.renderizar(fv4, rotulos=False, max_px=6000, override=over)
+            rotulo = {}
+            for a in P["amb"]:
+                f = pares.get(id(a))
+                if f:
+                    rotulo[id(f)] = (a.get("rotulo") or a["nome"]).upper()
+            por_nome = {}
+            for f in fv4.get("ambientes") or []:
+                por_nome.setdefault(f.get("nome"), []).append(f)
+            etiquetas = []
+            for e in ets:
+                f = next((x for x in por_nome.get(e["nome"], []) if abs(float(x.get("area") or 0) -
+                                                                       float(e.get("area") or 0)) < 0.01), None)
+                nome = rotulo.get(id(f)) if f is not None else None
+                if not nome or nome.startswith("AMBIENTE"):
+                    continue
+                if e.get("area") and e["area"] < 0.8:
+                    continue
+                etiquetas.append({"nome": nome, "area": float(e.get("area") or 0), "x": e["x"], "y": e["y"],
+                                  "vao": max(4.0, 2 * e.get("meia_larg", e["folga_px"])),
+                                  "raio": max(2.0, e.get("meia_alt", e["folga_px"])), "confiavel": True})
+        except Exception as ex:          # qualquer falha: volta ao caminho do PDF
+            print("render falhou, usando o PDF:", ex)
+            img = etiquetas = None
+    if img is None:
+        img, etiquetas = humanizar.desenhar(P, dpi_saida=dpi_saida,
+                                            paleta="viva" if estilo == "viva" else "neutra",
+                                            override=pisos or {})
     textos = _textos(P)
     saida = os.path.join(TMP, "PRANCHA.pdf")
     prancha.montar(img, cam["fachada"], P["amb"], titulo, saida,

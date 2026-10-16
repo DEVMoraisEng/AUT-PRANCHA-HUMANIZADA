@@ -10,7 +10,7 @@ import re
 
 # (padrao, nome de venda). O primeiro que casar manda.
 APELIDOS = [
-    (r"^Á\.?\s*PERME[AÁ]VEL.*", "JARDIM"),
+    (r"^(?:Á\.?|ÁREA)\s*PERME[AÁ]VEL.*", "JARDIM"),
     (r"^JD\.?\s*DE\s*INVERNO$", "JARDIM DE INVERNO"),
     (r"^Á\.?\s*SERVI[CÇ]O\s*E\s*GOURMET$", "ÁREA DE SERVIÇO E GOURMET"),
     (r"^Á\.?\s*SERVI[CÇ]O$", "ÁREA DE SERVIÇO"),

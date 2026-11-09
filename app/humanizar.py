@@ -53,6 +53,17 @@ PALETAS = {
         "ceramica50": dict(cor=(224, 216, 204), junta=(199, 191, 180),  tipo="porcelanato", modulo=0.50),
         "concreto":   dict(cor=(192, 189, 183), junta=None,             tipo="concreto",    modulo=None),
         "grama":      dict(cor=(104, 148, 58),  junta=None,             tipo="gramado",     modulo=None),
+        # 09/11/2026: os nomes do desenho novo (render.py / ficha v4). A tabela
+        # do gerador oferece estes acabamentos; quando o desenho novo falha e a
+        # prancha cai neste caminho do PDF, a escolha chegava aqui e dava
+        # KeyError ('porcelanato'). Cores = render.PALETA.
+        "porcelanato": dict(cor=(231, 224, 212), junta=(204, 196, 184), tipo="porcelanato", modulo=0.60),
+        "ceramica":   dict(cor=(233, 230, 221), junta=(206, 202, 192),  tipo="porcelanato", modulo=0.45),
+        "madeira":    dict(cor=(176, 133, 92),  junta=None,             tipo="concreto",    modulo=None),
+        "pedra":      dict(cor=(204, 196, 184), junta=None,             tipo="concreto",    modulo=None),
+        "pintado":    dict(cor=(133, 135, 138), junta=None,             tipo="concreto",    modulo=None),
+        "deck":       dict(cor=(153, 110, 74),  junta=None,             tipo="concreto",    modulo=None),
+        "brita":      dict(cor=(179, 176, 171), junta=None,             tipo="concreto",    modulo=None),
         "_copa":      (62, 116, 44),
     },
     "neutra": {
@@ -94,6 +105,29 @@ REGRAS = [
      r"BANHO|WC|LAVABO|SANIT|SERVI[CÇ]O|LAVAND|HALL|CIRCULA", "ceramica50"),
 ]
 PADRAO = "concreto"
+
+
+# Acabamento sem entrada na paleta escolhida (as paletas "neutra" e "cor" so
+# tem os 4 basicos): usa o equivalente mais proximo em vez de quebrar.
+SINONIMOS = {
+    "porcelanato": "ceramica50", "porcelanato60": "ceramica50", "ceramica": "ceramica50",
+    "pedra": "ceramica50", "madeira": "ceramica50",
+    "pintado": "concreto", "deck": "concreto", "brita": "concreto",
+    "gramado": "grama",
+}
+
+
+def mat_da_paleta(paleta, mat):
+    pal = PALETAS.get(paleta) or PALETAS["viva"]
+    if mat in pal and not str(mat).startswith("_"):
+        return pal[mat]
+    chave = str(mat or "").strip().lower()
+    if chave in pal and not chave.startswith("_"):
+        return pal[chave]
+    alt = SINONIMOS.get(chave)
+    if alt and alt in pal:
+        return pal[alt]
+    return pal[PADRAO]
 
 
 def material_de(nome, override=None):
@@ -166,7 +200,7 @@ def textura(shape, mat, px_por_m, seed=0, paleta="viva", esc=1.0):
     Como a malha e unica para a planta inteira, ela nao quebra na divisa
     entre um comodo e outro."""
     H, W = shape
-    m = PALETAS[paleta][mat]
+    m = mat_da_paleta(paleta, mat)
     cor = np.array(m["cor"], np.float32)
     base = np.empty((H, W, 3), np.float32)
     base[:] = cor

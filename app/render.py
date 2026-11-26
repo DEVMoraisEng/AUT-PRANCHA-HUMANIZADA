@@ -801,6 +801,37 @@ def sp_planta(W, D, k, rng):
     return _sombreado(im, 0.25)
 
 
+def sp_arbusto(W, D, k, rng):
+    """Arbusto/árvore de jardim visto de cima: copa de folhagem, sem vaso."""
+    s = max(W, D)
+    im, d = _novo(s, s)
+    d.ellipse((s * 0.04, s * 0.04, s * 0.96, s * 0.96), fill=_cor((0.24, 0.42, 0.17)) + (255,))
+    for i in range(26):
+        a = rng.random() * 2 * math.pi
+        rr = s * 0.30 * math.sqrt(rng.random())
+        cx, cy = s / 2 + math.cos(a) * rr, s / 2 + math.sin(a) * rr
+        r = s * (0.10 + rng.random() * 0.09)
+        g = _mix((0.26, 0.47, 0.18), (0.55, 0.72, 0.32), rng.random())
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=_cor(g) + (255,))
+    return _sombreado(im, 0.30)
+
+
+def sp_tampa(W, D, k, rng):
+    """Tampa/grelha redonda no chão (caixa de inspeção, ralo de jardim)."""
+    s = max(W, D)
+    im, d = _novo(s, s)
+    lw = max(1, int(0.012 * k))
+    d.ellipse((0, 0, s - 1, s - 1), fill=_cor((0.62, 0.62, 0.60)) + (255,),
+              outline=_cor((0.35, 0.35, 0.34)) + (255,), width=lw)
+    n = 5
+    for i in range(1, n):
+        t = s * i / n
+        h = math.sqrt(max(0.0, (s / 2) ** 2 - (t - s / 2) ** 2))
+        d.line((t, s / 2 - h, t, s / 2 + h), fill=_cor((0.38, 0.38, 0.37)) + (255,), width=lw)
+        d.line((s / 2 - h, t, s / 2 + h, t), fill=_cor((0.38, 0.38, 0.37)) + (255,), width=lw)
+    return _sombreado(im, 0.10)
+
+
 def sp_generico(W, D, k, rng):
     im, d = _novo(W, D)
     _rr(d, (0, 0, W, D), 0.025 * k, _cor((0.86, 0.84, 0.80)) + (255,), _cor(CONTORNO) + (255,), max(1, int(0.006 * k)))
@@ -811,6 +842,8 @@ CATALOGO = [
     # (regex no texto família+tipo+categoria, função, camada)   camada 0 = no chão (tapete); -1 = não desenha
     (r'TORNEIRA|ASSENTO|REGISTRO|RALO|CHUVEIRINHO|DUCHA HIGIEN|ACABAMENTO|SIFAO|VALVULA|PAPELEIRA|SABONETEIRA|'
      r'CABIDE|TOALHEIRO|ESPELHO|INTERRUPTOR|TOMADA', 'ignorar', -1),
+    (r'ARBUSTO|ARVORE|SHRUB|TREE|FOLHAGEM|PALMEIRA', 'arbusto', 2),
+    (r'TAMPA|GRELHA|CAIXA DE INSPE|CAIXA DE PASSAGEM', 'tampa', 1),
     (r'TAPETE', 'tapete', 0),
     (r'BELICHE|CAMA|BED', 'cama', 2),
     (r'SOFA|SOFÁ|ESTOFADO|CHAISE', 'sofa', 2),
@@ -909,13 +942,190 @@ def tipo_do_objeto(o):
     return 'generico', 2
 
 
+def _regioes(aneis):
+    """Anéis de um piso → regiões [(anéis, área m²)]: anel solto é uma região
+    (o Revit manda faces separadas do mesmo piso juntas); anel dentro de
+    outro é furo dele."""
+    aneis = [a for a in aneis or [] if len(a) >= 3]
+    pai = {}
+    for i, a in enumerate(aneis):
+        x, y = a[0]
+        donos = [j for j, b in enumerate(aneis) if j != i and _dentro(x, y, b)]
+        if len(donos) % 2 == 1:                  # furo: o menor anel que o contém
+            pai[i] = min(donos, key=lambda j: _area_anel(aneis[j]))
+    out = []
+    for i, a in enumerate(aneis):
+        if i in pai:
+            continue
+        furos = [aneis[j] for j, p in pai.items() if p == i]
+        area = _area_anel(a) - sum(_area_anel(f) for f in furos)
+        out.append(([a] + furos, area))
+    return out
+
+
+# ─────────────────────────────────────────── vegetação que só existe no PDF
+def _pdf_para_modelo(page, ficha):
+    """Ajusta PDF(pt) → modelo(m) pelas manchas de cor dos ambientes: cada
+    ambiente tem uma cor única na planta exportada e o contorno dele está na
+    ficha. Devolve função (x_pt, y_pt) → (x_m, y_m), ou None."""
+    cores_amb = {}
+    for a in ficha.get('ambientes') or []:
+        if a.get('cor') and a.get('contorno'):
+            cores_amb[tuple(int(v) for v in a['cor'])] = a
+    px, mx, py, my = [], [], [], []
+    for d in page.get_drawings():
+        fc = d.get('fill')
+        if not fc:
+            continue
+        c = tuple(int(round(v * 255)) for v in fc[:3])
+        a = next((v for k_, v in cores_amb.items() if max(abs(k_[i] - c[i]) for i in range(3)) <= 2), None)
+        if a is None:
+            continue
+        r = d['rect']
+        xs = [p[0] for p in a['contorno'][0]]
+        ys = [p[1] for p in a['contorno'][0]]
+        px += [r.x0, r.x1]
+        mx += [min(xs), max(xs)]
+        py += [r.y0, r.y1]
+        my += [max(ys), min(ys)]
+    if len(px) < 4:
+        return None
+    ax, bx = np.polyfit(mx, px, 1)
+    ay, by = np.polyfit(my, py, 1)
+    if abs(ax) < 1e-6 or abs(ay) < 1e-6:
+        return None
+    erro = max(np.max(np.abs(np.polyval([ax, bx], mx) - px)), np.max(np.abs(np.polyval([ay, by], my) - py)))
+    if erro > 2.0 * abs(ax) * 0.05:          # mais de ~10 cm de desencontro: não confia
+        return None
+    return lambda x, y: ((x - bx) / ax, (y - by) / ay), abs(ax)
+
+
+def _circulo(pts):
+    """Ajuste algébrico de círculo → (cx, cy, r, erro_rel, ângulos)."""
+    P = np.array(pts, float)
+    if len(P) < 5:
+        return None
+    A = np.c_[2 * P[:, 0], 2 * P[:, 1], np.ones(len(P))]
+    b = (P ** 2).sum(axis=1)
+    try:
+        (cx, cy, c), *_ = np.linalg.lstsq(A, b, rcond=None)
+    except Exception:
+        return None
+    r2 = c + cx * cx + cy * cy
+    if r2 <= 0:
+        return None
+    r = math.sqrt(r2)
+    d = np.hypot(P[:, 0] - cx, P[:, 1] - cy)
+    ang = np.degrees(np.arctan2(P[:, 1] - cy, P[:, 0] - cx)) % 360
+    return cx, cy, r, float(np.max(np.abs(d - r)) / r), ang
+
+
+def vegetacao_do_pdf(page, ficha):
+    """Arbustos/árvores e tampas redondas que o Revit pôs na planta mas não
+    exportou na ficha (fora dos ambientes: jardim, garagem, quintal).
+
+    No PDF eles são círculos desenhados em pedaços de reta. Círculo liso →
+    arbusto; círculo com grade dentro → tampa/grelha. Círculo dentro de
+    ambiente fica de fora (cuba, ralo de box, mesa redonda já vêm da ficha)."""
+    if page is None:
+        return []
+    mapa = _pdf_para_modelo(page, ficha)
+    if not mapa:
+        return []
+    conv, pt_m = mapa
+    amb = [a.get('contorno') or [] for a in ficha.get('ambientes') or []]
+    xs = [p[0] for c in amb for anel in c for p in anel]
+    if not xs:
+        return []
+    ax0, ax1 = min(xs), max(xs)
+    x0l, y0l, x1l, y1l = _limites(ficha)
+
+    arcos, retas = [], []
+    for d in page.get_drawings():
+        if d.get('fill') or not d.get('color'):
+            continue
+        its = d['items']
+        if len(its) == 1 and its[0][0] == 'l':
+            retas.append((its[0][1], its[0][2]))
+            continue
+        if len(its) < 5 or any(it[0] not in ('l', 'c') for it in its):
+            continue
+        pts = []
+        for it in its:
+            qs = [(q.x, q.y) for q in it[1:] if hasattr(q, 'x')]
+            for (xa, ya), (xb, yb) in zip(qs, qs[1:]):   # adensa: só os vértices
+                for t in (0.0, 0.25, 0.5, 0.75):         # deixam buraco no ângulo
+                    pts.append((xa + (xb - xa) * t, ya + (yb - ya) * t))
+            if qs:
+                pts.append(qs[-1])
+        f = _circulo(pts)
+        if not f:
+            continue
+        cx, cy, r, er, ang = f
+        r_m = r / pt_m
+        if er > 0.04 or not (0.12 <= r_m <= 2.5):
+            continue
+        arcos.append((cx, cy, r, ang))
+
+    # junta os pedaços (o Revit desenha cada círculo em 2 metades, às vezes repetidas)
+    grupos = []
+    for cx, cy, r, ang in arcos:
+        for g in grupos:
+            if math.hypot(g['cx'] - cx, g['cy'] - cy) < 0.08 * r and abs(g['r'] - r) < 0.08 * r:
+                g['ang'] = np.r_[g['ang'], ang]
+                break
+        else:
+            grupos.append({'cx': cx, 'cy': cy, 'r': r, 'ang': np.array(ang)})
+
+    out = []
+    for g in grupos:
+        hist = np.histogram(g['ang'], bins=36, range=(0, 360))[0]
+        if (hist > 0).sum() < 30:            # não fecha o círculo: arco de porta etc.
+            continue
+        mxm, mym = conv(g['cx'], g['cy'])
+        rm = g['r'] / pt_m
+        if not (ax0 - 0.05 <= mxm <= ax1 + 0.05 and y0l <= mym <= y1l):
+            continue
+        if any(sum(1 for anel in c if _dentro(mxm, mym, anel)) % 2 == 1 for c in amb):
+            continue
+        grade = sum(1 for p, q in retas
+                    if math.hypot(p.x - g['cx'], p.y - g['cy']) <= g['r'] * 1.05
+                    and math.hypot(q.x - g['cx'], q.y - g['cy']) <= g['r'] * 1.05
+                    and math.hypot(p.x - q.x, p.y - q.y) >= 0.5 * g['r'])
+        tampa = grade >= 3
+        out.append({
+            'cantos': [[mxm - rm, mym - rm], [mxm + rm, mym - rm], [mxm + rm, mym + rm], [mxm - rm, mym + rm]],
+            'categoria': 'Site' if tampa else 'Planting',
+            'familia': 'TAMPA GRELHA (PDF)' if tampa else 'ARBUSTO (PDF)',
+            'tipo': '', 'frente': [0, 1], 'espelhado': False,
+            'largura': 2 * rm, 'fundo': 2 * rm, '_do_pdf': True,
+        })
+    return out
+
+
 # ───────────────────────────────────────────────────────── renderizar
-LUZ = (1.0, -1.35)        # sombra vai para a direita e para baixo na folha
+LUZ =(1.0, -1.35)        # sombra vai para a direita e para baixo na folha
+
+
+def _aneis_de(item):
+    """Paredes vêm como anel solto; pisos/lote como {'contorno': [anéis]}."""
+    if isinstance(item, dict):
+        return item.get('contorno') or []
+    if item and isinstance(item[0], (list, tuple)) and item[0] and isinstance(item[0][0], (int, float)):
+        return [item]
+    return item or []
 
 
 def _limites(ficha):
-    """Enquadramento: os AMBIENTES (com folga para o muro e a calçada). Parede
-    que o recorte da vista pegou do vizinho não alarga a folha."""
+    """Enquadramento: a FAIXA DA CASA (largura dos ambientes) em X, e em Y tudo
+    o que está nessa faixa — ambientes, paredes e pisos.
+
+    Garagem, varanda, calçada e quintal quase nunca são ambiente no Revit:
+    enquadrando só pelos ambientes, a garagem ficava fora da prancha. Agora
+    parede/piso que cruza a faixa da casa estica a folha para cima/baixo.
+    Parede do vizinho fica fora da faixa em X e continua sem alargar a folha;
+    piso de terreno muito mais largo que a casa (toposolid do loteamento
+    inteiro) também é ignorado."""
     xs, ys = [], []
     for a in ficha.get('ambientes') or []:
         for anel in a.get('contorno') or []:
@@ -923,7 +1133,32 @@ def _limites(ficha):
                 xs.append(x)
                 ys.append(y)
     if xs:
-        return min(xs) - 0.2, min(ys) - 0.2, max(xs) + 0.2, max(ys) + 0.2
+        ax0, ax1 = min(xs), max(xs)
+        y0, y1 = min(ys), max(ys)
+        larg = ax1 - ax0
+        for chave in ('lote', 'paredes', 'pisos', 'portas'):
+            for item in ficha.get(chave) or []:
+                if chave == 'portas':
+                    if not isinstance(item, dict) or not item.get('centro'):
+                        continue
+                    cx, cy = item['centro']
+                    if ax0 - 0.05 <= cx <= ax1 + 0.05:
+                        y0, y1 = min(y0, cy), max(y1, cy)
+                    continue
+                for anel in _aneis_de(item):
+                    try:
+                        px = [float(p[0]) for p in anel]
+                        py = [float(p[1]) for p in anel]
+                    except (TypeError, ValueError, IndexError):
+                        continue
+                    if not px:
+                        continue
+                    if max(px) - min(px) > 1.5 * larg + 1.0:
+                        continue          # terreno/vizinhança inteira
+                    sobrepoe = min(max(px), ax1) - max(min(px), ax0)
+                    if sobrepoe > 0.05:
+                        y0, y1 = min(y0, min(py)), max(y1, max(py))
+        return ax0 - 0.2, y0 - 0.2, ax1 + 0.2, y1 + 0.2
     for chave in ('lote', 'paredes'):
         for anel in ficha.get(chave) or []:
             for x, y in anel:
@@ -1044,6 +1279,10 @@ def _desenhar_sprite(nome, W, D, k, rng, o, tela):
         im = sp_chuveiro(Wp, Dp, kk, rng)
     elif nome == 'planta':
         im = sp_planta(Wp, Dp, kk, rng)
+    elif nome == 'arbusto':
+        im = sp_arbusto(Wp, Dp, kk, rng)
+    elif nome == 'tampa':
+        im = sp_tampa(Wp, Dp, kk, rng)
     elif nome == 'bancada':
         poli = None
         cont = o.get('contorno')
@@ -1156,9 +1395,17 @@ def renderizar(ficha, px_m=None, max_px=5200, margem_m=0.25, rotulos=True, fonte
     # ── 2. pisos genéricos (contrapiso, calçada, toposólido) por baixo
     pisos = ficha.get('pisos') or []
     acabamentos = []
+    jardins_pisos = []                       # grama fora de ambiente → etiqueta JARDIM
     for i, p in enumerate(pisos):
         mat, tam, expl = classificar_piso(p.get('texto', ''))
-        if mat in ('concreto', 'pintado') or norm(p.get('categoria', '')) == 'TOPOSOLID':
+        topo = norm(p.get('categoria', '')) == 'TOPOSOLID'
+        if topo and not expl:
+            # terreno sem material no Revit é o chão natural do lote: jardim,
+            # não concreto (era isso que apagava a grama da garagem/quintal)
+            mat, tam = 'grama', None
+        if mat == 'grama':
+            jardins_pisos.append(p)
+        if mat in ('concreto', 'pintado') or topo:
             a = tela.mascara(p.get('contorno') or [])
             c = _caixa(a)
             if c:
@@ -1412,7 +1659,23 @@ def renderizar(ficha, px_m=None, max_px=5200, margem_m=0.25, rotulos=True, fonte
     porta_giro = np.asarray(op_) > 0
     etiquetas = []
     livre_mov = (sombra_mov < 0.3) & ~ocupado
-    for amb, a, mat in amb_alfa:
+    # JARDIM: a grama do lote quase nunca é ambiente no Revit, mas na prancha
+    # de venda ela tem nome e área como qualquer cômodo. Cada canteiro separado
+    # ganha a sua etiqueta, com a área do contorno do Revit (não entra na área
+    # construída — não passa pela lista de ambientes).
+    jardins = []
+    casa = np.zeros((H, W), bool)
+    for _amb, _a, _m in amb_alfa:
+        casa |= _a > 0.5
+    for p in jardins_pisos:
+        for aneis_, area_ in _regioes(p.get('contorno') or []):
+            if area_ < 0.8:
+                continue
+            a_ = tela.mascara(aneis_) * (~casa)
+            if a_.sum() / (k * k) < 0.5 * area_:       # é chão de cômodo, não jardim
+                continue
+            jardins.append(({'nome': 'JARDIM', 'area': round(area_, 2), '_jardim': True}, a_, 'grama'))
+    for amb, a, mat in amb_alfa + jardins:
         m = (a > 0.5) & livre_mov
         if m.sum() < 20:
             m = a > 0.5
@@ -1459,7 +1722,8 @@ def renderizar(ficha, px_m=None, max_px=5200, margem_m=0.25, rotulos=True, fonte
                           'livre': mapas['livre'], 'livre2': mapas['livre2'],
                           'x': float((ha + hb) / 2.0), 'y': float(iy),
                           'folga_px': float(dt[iy, ix]), 'meia_larg': float(hb - ha) / 2.0 - 0.05 * k,
-                          'meia_alt': float(min(dt[iy, ix] * 2.5, (vb - va) / 2.0)) - 0.05 * k, 'material': mat})
+                          'meia_alt': float(min(dt[iy, ix] * 2.5, (vb - va) / 2.0)) - 0.05 * k, 'material': mat,
+                          'jardim': bool(amb.get('_jardim'))})
     if rotulos:
         _rotular(imgP, etiquetas, k, fonte, fonte_bold)
     return imgP, etiquetas, tela

@@ -216,6 +216,27 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
                 f = pares.get(id(a))
                 if f and pisos and a["nome"] in pisos:
                     over[f.get("nome")] = pisos[a["nome"]]
+            # arbustos/tampas do jardim e da garagem: estão no PDF mas a ficha
+            # não traz (o exportador só manda móveis/louças). Sem isto a frente
+            # do lote saía vazia.
+            try:
+                veg = render.vegetacao_do_pdf(P.get("page"), fv4)
+            except Exception as ex:
+                print("vegetacao do PDF ignorada:", ex)
+                veg = []
+            if veg:
+                existentes = fv4.get("objetos") or []
+                def _ja_tem(v):
+                    cx = sum(c[0] for c in v["cantos"]) / 4
+                    cy = sum(c[1] for c in v["cantos"]) / 4
+                    for o in existentes:
+                        xs_ = [c[0] for c in o.get("cantos") or []]
+                        ys_ = [c[1] for c in o.get("cantos") or []]
+                        if xs_ and min(xs_) <= cx <= max(xs_) and min(ys_) <= cy <= max(ys_):
+                            return True
+                    return False
+                fv4 = dict(fv4)
+                fv4["objetos"] = list(existentes) + [v for v in veg if not _ja_tem(v)]
             img, ets, _tela = render.renderizar(fv4, rotulos=False, max_px=6000, override=over)
             rotulo = {}
             for a in P["amb"]:
@@ -227,6 +248,12 @@ def gerar(planta_b64, fachada_b64, titulo="CASA", lote=None, pagina=0,
                 por_nome.setdefault(f.get("nome"), []).append(f)
             etiquetas = []
             for e in ets:
+                if e.get("jardim"):
+                    etiquetas.append({"nome": "JARDIM", "area": float(e.get("area") or 0), "x": e["x"], "y": e["y"],
+                                      "vao": max(4.0, 2 * e.get("meia_larg", e["folga_px"])),
+                                      "raio": max(2.0, e.get("meia_alt", e["folga_px"])), "confiavel": True,
+                                      "livre": e.get("livre"), "livre2": e.get("livre2")})
+                    continue
                 f = next((x for x in por_nome.get(e["nome"], []) if abs(float(x.get("area") or 0) -
                                                                        float(e.get("area") or 0)) < 0.01), None)
                 nome = rotulo.get(id(f)) if f is not None else None

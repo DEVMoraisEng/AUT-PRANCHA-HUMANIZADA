@@ -830,29 +830,32 @@ def sp_generico(W, D, k, rng):
 
 CATALOGO = [
     # (regex no texto família+tipo+categoria, função, camada)   camada 0 = no chão (tapete); -1 = não desenha
+    # Nomes em português E em inglês: família baixada da internet/BIMobject
+    # vem como 'Couch02', 'Bed', 'Wardrobe'... e caía no retângulo genérico.
     (r'TORNEIRA|ASSENTO|REGISTRO|RALO|CHUVEIRINHO|DUCHA HIGIEN|ACABAMENTO|SIFAO|VALVULA|PAPELEIRA|SABONETEIRA|'
-     r'CABIDE|TOALHEIRO|ESPELHO|INTERRUPTOR|TOMADA', 'ignorar', -1),
+     r'CABIDE|TOALHEIRO|ESPELHO|INTERRUPTOR|TOMADA|FAUCET|(?<![A-Z])SEAT(?![A-Z])|MIRROR|TOWEL|(?<![A-Z])DRAIN(?![A-Z])', 'ignorar', -1),
     (r'ARBUSTO|ARVORE|SHRUB|TREE|FOLHAGEM|PALMEIRA', 'arbusto', 2),
-    (r'TAPETE', 'tapete', 0),
-    (r'BELICHE|CAMA|BED', 'cama', 2),
-    (r'SOFA|SOFÁ|ESTOFADO|CHAISE', 'sofa', 2),
-    (r'POLTRONA|ARMCHAIR|PUFF|PUFE', 'poltrona', 2),
-    (r'GUARDA.?ROUPA|ROUPEIRO|ARMARIO|ARMÁRIO|CLOSET|WARDROBE', 'guarda_roupa', 2),
-    (r'CRIADO|CABECEIRA|MESA DE APOIO|NIGHT', 'criado', 2),
-    (r'RACK|PAINEL TV|HOME THEATER|ESTANTE', 'rack', 2),
+    (r'TAPETE|(?<![A-Z])RUG(?![A-Z])|CARPET', 'tapete', 0),
+    (r'BELICHE|CAMA|(?<![A-Z])BED(?![A-Z])|BUNK', 'cama', 2),
+    (r'SOFA|ESTOFADO|CHAISE|COUCH|LOVESEAT|SETTEE|SECTIONAL|(?<![A-Z])DIVA(?![A-Z])', 'sofa', 2),
+    (r'POLTRONA|ARMCHAIR|PUFF|PUFE|RECLINER|LOUNGE CHAIR', 'poltrona', 2),
+    (r'GUARDA.?ROUPA|ROUPEIRO|ARMARIO|CLOSET|WARDROBE|ARMOIRE', 'guarda_roupa', 2),
+    (r'CRIADO|CABECEIRA|MESA DE APOIO|NIGHT|BEDSIDE', 'criado', 2),
+    (r'RACK|HOME THEATER|ESTANTE|(?<![A-Z])TV(?![A-Z])|TELEVIS|BOOKCASE|SHELF|SHELVING|APARADOR|BUFFET|'
+     r'DRESSER|COMODA|SAPATEIRA|SIDEBOARD|CREDENZA', 'rack', 2),
     (r'MESA DE CENTRO|MESA CENTRO|COFFEE', 'mesa_centro', 2),
-    (r'ESCRIVANINHA|MESA DE ESCRITORIO|MESA ESCRITORIO|DESK|ESTUDO', 'escrivaninha', 2),
-    (r'MESA|TABLE', 'mesa', 2),
-    (r'CADEIRA|CHAIR|BANQUETA', 'poltrona', 2),
-    (r'COOKTOP|FOGAO|FOGÃO|STOVE', 'cooktop', 3),
-    (r'GELADEIRA|REFRIGERADOR|FRIDGE', 'geladeira', 2),
-    (r'MAQUINA|MÁQUINA|LAVADORA|WASHER', 'maquina', 2),
-    (r'TANQUE', 'tanque', 2),
-    (r'CHURRASQ', 'churrasqueira', 2),
-    (r'BANCADA|GRANITO|COUNTER|NICHO', 'bancada', 2),
-    (r'CUBA|LAVATORIO|LAVATÓRIO|PIA|SINK|BASIN', 'cuba', 3),
-    (r'BACIA|VASO SANIT|SANITARIO|SANITÁRIO|TOILET|BIDE', 'bacia', 2),
-    (r'CHUVEIRO|BOX|DUCHA|SHOWER', 'chuveiro', 1),
+    (r'ESCRIVANINHA|MESA DE ESCRITORIO|MESA ESCRITORIO|(?<![A-Z])DESK(?![A-Z])|ESTUDO|WORKSTATION', 'escrivaninha', 2),
+    (r'MESA|TABLE|DINING', 'mesa', 2),
+    (r'CADEIRA|CHAIR|BANQUETA|(?<![A-Z])BANCO(?![A-Z])|STOOL', 'poltrona', 2),
+    (r'COOKTOP|FOGAO|STOVE|(?<![A-Z])RANGE(?![A-Z])|(?<![A-Z])OVEN(?![A-Z])|FORNO|(?<![A-Z])HOB(?![A-Z])', 'cooktop', 3),
+    (r'GELADEIRA|REFRIGERADOR|FRIDGE|REFRIGERATOR|FREEZER', 'geladeira', 2),
+    (r'MAQUINA|LAVADORA|WASHER|WASHING|DRYER|SECADORA', 'maquina', 2),
+    (r'TANQUE|LAUNDRY TUB|UTILITY SINK', 'tanque', 2),
+    (r'CHURRASQ|BARBECUE|(?<![A-Z])BBQ(?![A-Z])', 'churrasqueira', 2),
+    (r'BANCADA|GRANITO|COUNTER|NICHO|BALCAO|(?<![A-Z])ILHA(?![A-Z])|ISLAND', 'bancada', 2),
+    (r'CUBA|LAVATORIO|(?<![A-Z])PIA(?![A-Z])|SINK|BASIN', 'cuba', 3),
+    (r'BACIA|VASO SANIT|SANITARIO|TOILET|BIDE|(?<![A-Z])WC(?![A-Z])', 'bacia', 2),
+    (r'CHUVEIRO|(?<![A-Z])BOX(?![A-Z])|DUCHA|SHOWER|BANHEIRA|BATHTUB', 'chuveiro', 1),
     (r'PLANTA|VASO DE PLANTA|FLOREIRA|PLANT', 'planta', 2),
 ]
 
@@ -863,7 +866,16 @@ COSTAS = {'cama': 'curto', 'bacia': 'curto', 'sofa': 'longo', 'poltrona': None, 
           'criado': None, 'churrasqueira': 'longo', 'cuba': None, 'escrivaninha': 'longo', 'cooktop': None}
 
 
-def _encostar(o, nome, dist_m, tela):
+def _centro_do_comodo(p, ficha):
+    """Centro do ambiente que contém o ponto p (ou None)."""
+    for a in (ficha or {}).get('ambientes') or []:
+        aneis = a.get('contorno') or []
+        if aneis and sum(1 for r in aneis if _dentro(p[0], p[1], r)) % 2 == 1:
+            return np.array(aneis[0], float).mean(axis=0)
+    return None
+
+
+def _encostar(o, nome, dist_m, tela, ficha=None):
     """Família com eixo 'torto' (frente para a parede, sofá com o lado
     comprido no fundo...): a peça é girada para que o lado que encosta na
     parede seja as COSTAS. Só mexe quando a parede está claramente de um lado
@@ -906,9 +918,17 @@ def _encostar(o, nome, dist_m, tela):
         i = oposta[0]
     else:
         melhor = min(cand, key=lambda a: a[2])
-        if melhor[2] > 0.15:
-            return o
-        i = melhor[0]
+        if melhor[2] <= 0.15:
+            i = melhor[0]
+        else:
+            # Família com o eixo trocado (ex.: 'Couch02' com largura 1,07 e
+            # fundo 1,52) e longe da parede: o encosto continua sendo o lado
+            # que a regra manda (longo/curto). Dos candidatos, o mais longe do
+            # centro do cômodo — a frente vira para dentro (sofá para a TV).
+            ref = _centro_do_comodo(cen, ficha)
+            if ref is None:
+                return o
+            i = max(cand, key=lambda a: np.linalg.norm((cs[a[0]] + cs[(a[0] + 1) % 4]) / 2.0 - ref))[0]
     novos = [cs[(i + j) % 4] for j in range(4)]           # c0-c1 = costas
     ey = novos[3] - novos[0]
     o = dict(o)
@@ -1538,7 +1558,7 @@ def renderizar(ficha, px_m=None, max_px=5200, margem_m=0.25, rotulos=True, fonte
         if camada < 0:
             continue
         try:
-            o = _encostar(o, nome, dist_enc, tela)
+            o = _encostar(o, nome, dist_enc, tela, ficha)
         except Exception:
             pass
         objs.append((camada, nome, o))

@@ -1131,16 +1131,6 @@ def _aneis_de(item):
     return item or []
 
 
-def _na_faixa(p, ficha):
-    """Piso não mais largo que a casa (canteiro do lote, não o terreno do
-    loteamento inteiro). O terreno geral sem material continua concreto."""
-    xs = [q[0] for a in ficha.get('ambientes') or [] for anel in a.get('contorno') or [] for q in anel]
-    px = [q[0] for anel in p.get('contorno') or [] for q in anel]
-    if not xs or not px:
-        return False
-    return max(px) - min(px) <= 1.5 * (max(xs) - min(xs)) + 1.0
-
-
 def _limites(ficha):
     """Enquadramento: a FAIXA DA CASA (largura dos ambientes) em X, e em Y tudo
     o que está nessa faixa — ambientes, paredes e pisos.
@@ -1429,7 +1419,7 @@ def renderizar(ficha, px_m=None, max_px=5200, margem_m=0.25, rotulos=True, fonte
     for i, p in enumerate(pisos):
         mat, tam, expl = classificar_piso(p.get('texto', ''))
         topo = norm(p.get('categoria', '')) == 'TOPOSOLID'
-        if topo and not expl and _na_faixa(p, ficha):
+        if topo and not expl:
             # terreno sem material no Revit é o chão natural do lote: jardim,
             # não concreto (era isso que apagava a grama da garagem/quintal)
             mat, tam = 'grama', None
@@ -1697,14 +1687,37 @@ def renderizar(ficha, px_m=None, max_px=5200, margem_m=0.25, rotulos=True, fonte
     casa = np.zeros((H, W), bool)
     for _amb, _a, _m in amb_alfa:
         casa |= _a > 0.5
-    for p in jardins_pisos:
-        for aneis_, area_ in _regioes(p.get('contorno') or []):
-            if area_ < 0.8:
+    if jardins_pisos:
+        grama = np.zeros((H, W), bool)
+        regioes = []
+        for p in jardins_pisos:
+            grama |= tela.mascara(p.get('contorno') or []) > 0.5
+            regioes += _regioes(p.get('contorno') or [])
+        # grama visível: fora dos cômodos e das paredes. Cada mancha separada
+        # (pátio lateral, recuo da frente, canteiro entre as faixas do carro)
+        # é um JARDIM com a sua área.
+        grama &= ~casa & (a_par0 < 0.5)
+        rot, n = ndimage.label(grama)
+        for idx, fatia in enumerate(ndimage.find_objects(rot), 1):
+            if fatia is None:
                 continue
-            a_ = tela.mascara(aneis_) * (~casa)
-            if a_.sum() / (k * k) < 0.5 * area_:       # é chão de cômodo, não jardim
+            ys_, xs_ = fatia
+            if ys_.start == 0 or xs_.start == 0 or ys_.stop >= H or xs_.stop >= W:
+                continue               # encosta na borda: terreno do vizinho / fora do lote
+            comp = rot == idx
+            area_px = comp.sum() / (k * k)
+            if area_px < 0.8:
                 continue
-            jardins.append(({'nome': 'JARDIM', 'area': round(area_, 2), '_jardim': True}, a_, 'grama'))
+            # canteiro que é um anel inteiro do Revit: usa a área exata dele
+            area_ = area_px
+            for aneis_, ar_ in regioes:
+                if abs(ar_ - area_px) <= max(0.05, 0.04 * ar_):
+                    cx_, cy_ = tela.p(*_ponto_interno(aneis_))
+                    if 0 <= int(cy_) < H and 0 <= int(cx_) < W and comp[int(cy_), int(cx_)]:
+                        area_ = ar_
+                        break
+            jardins.append(({'nome': 'JARDIM', 'area': round(float(area_), 2), '_jardim': True},
+                            comp.astype(np.float32), 'grama'))
     for amb, a, mat in amb_alfa + jardins:
         m = (a > 0.5) & livre_mov
         if m.sum() < 20:

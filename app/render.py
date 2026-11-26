@@ -822,22 +822,6 @@ def sp_arbusto(W, D, k, rng):
     return _sombreado(im, 0.30)
 
 
-def sp_tampa(W, D, k, rng):
-    """Tampa/grelha redonda no chão (caixa de inspeção, ralo de jardim)."""
-    s = max(W, D)
-    im, d = _novo(s, s)
-    lw = max(1, int(0.012 * k))
-    d.ellipse((0, 0, s - 1, s - 1), fill=_cor((0.62, 0.62, 0.60)) + (255,),
-              outline=_cor((0.35, 0.35, 0.34)) + (255,), width=lw)
-    n = 5
-    for i in range(1, n):
-        t = s * i / n
-        h = math.sqrt(max(0.0, (s / 2) ** 2 - (t - s / 2) ** 2))
-        d.line((t, s / 2 - h, t, s / 2 + h), fill=_cor((0.38, 0.38, 0.37)) + (255,), width=lw)
-        d.line((s / 2 - h, t, s / 2 + h, t), fill=_cor((0.38, 0.38, 0.37)) + (255,), width=lw)
-    return _sombreado(im, 0.10)
-
-
 def sp_generico(W, D, k, rng):
     im, d = _novo(W, D)
     _rr(d, (0, 0, W, D), 0.025 * k, _cor((0.86, 0.84, 0.80)) + (255,), _cor(CONTORNO) + (255,), max(1, int(0.006 * k)))
@@ -849,7 +833,6 @@ CATALOGO = [
     (r'TORNEIRA|ASSENTO|REGISTRO|RALO|CHUVEIRINHO|DUCHA HIGIEN|ACABAMENTO|SIFAO|VALVULA|PAPELEIRA|SABONETEIRA|'
      r'CABIDE|TOALHEIRO|ESPELHO|INTERRUPTOR|TOMADA', 'ignorar', -1),
     (r'ARBUSTO|ARVORE|SHRUB|TREE|FOLHAGEM|PALMEIRA', 'arbusto', 2),
-    (r'TAMPA|GRELHA|CAIXA DE INSPE|CAIXA DE PASSAGEM', 'tampa', 1),
     (r'TAPETE', 'tapete', 0),
     (r'BELICHE|CAMA|BED', 'cama', 2),
     (r'SOFA|SOFÁ|ESTOFADO|CHAISE', 'sofa', 2),
@@ -1033,11 +1016,12 @@ def _circulo(pts):
 
 
 def vegetacao_do_pdf(page, ficha):
-    """Arbustos/árvores e tampas redondas que o Revit pôs na planta mas não
-    exportou na ficha (fora dos ambientes: jardim, garagem, quintal).
+    """Arbustos/árvores que o Revit pôs na planta mas não exportou na ficha
+    (fora dos ambientes: jardim, garagem, quintal).
 
     No PDF eles são círculos desenhados em pedaços de reta. Círculo liso →
-    arbusto; círculo com grade dentro → tampa/grelha. Círculo dentro de
+    arbusto; círculo com grade dentro é caixa de águas pluviais e NÃO vai
+    para a prancha. Círculo dentro de
     ambiente fica de fora (cuba, ralo de box, mesa redonda já vêm da ficha),
     a não ser que o ambiente seja de grama (ÁREA PERMEÁVEL, JARDIM)."""
     if page is None:
@@ -1107,11 +1091,12 @@ def vegetacao_do_pdf(page, ficha):
                     if math.hypot(p.x - g['cx'], p.y - g['cy']) <= g['r'] * 1.05
                     and math.hypot(q.x - g['cx'], q.y - g['cy']) <= g['r'] * 1.05
                     and math.hypot(p.x - q.x, p.y - q.y) >= 0.5 * g['r'])
-        tampa = grade >= 3
+        if grade >= 3:
+            continue          # círculo gradeado = caixa de águas pluviais: não vai para a prancha
         out.append({
             'cantos': [[mxm - rm, mym - rm], [mxm + rm, mym - rm], [mxm + rm, mym + rm], [mxm - rm, mym + rm]],
-            'categoria': 'Site' if tampa else 'Planting',
-            'familia': 'TAMPA GRELHA (PDF)' if tampa else 'ARBUSTO (PDF)',
+            'categoria': 'Planting',
+            'familia': 'ARBUSTO (PDF)',
             'tipo': '', 'frente': [0, 1], 'espelhado': False,
             'largura': 2 * rm, 'fundo': 2 * rm, '_do_pdf': True,
         })
@@ -1306,8 +1291,6 @@ def _desenhar_sprite(nome, W, D, k, rng, o, tela):
         im = sp_planta(Wp, Dp, kk, rng)
     elif nome == 'arbusto':
         im = sp_arbusto(Wp, Dp, kk, rng)
-    elif nome == 'tampa':
-        im = sp_tampa(Wp, Dp, kk, rng)
     elif nome == 'bancada':
         poli = None
         cont = o.get('contorno')

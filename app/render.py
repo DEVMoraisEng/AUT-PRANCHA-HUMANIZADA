@@ -1336,12 +1336,32 @@ def _desenhar_sprite(nome, W, D, k, rng, o, tela):
         clara = bool(re.search(r'BRANCO|MARMORE|ITAUNAS|SIENA|DALLAS|QUARTZO BRANCO|NANOGLASS|BRANCA', t))
         im = sp_bancada(Wp, Dp, kk, rng, poli,
                         cozinha=escura or (not clara and bool(re.search(r'COZINHA|GOURMET|BALCAO|CHURRAS', t))))
-        if re.search(r'CUBA|LAVATORIO|PIA', t) and not o.get('_tem_cuba'):
-            # cuba que faz parte da família da bancada (não vem como peça separada)
-            cw, cd = min(Wp * 0.8, 0.50 * kk), min(Dp * 0.7, 0.36 * kk)
-            cuba = sp_cuba(cw, cd, kk, rng, inox=bool(re.search(r'COZINHA|INOX|QUADRADA|RETANGULAR', t))
-                           and not re.search(r'OVAL|BANHEIRO|LAVATORIO', t))
-            im.alpha_composite(cuba, (int((Wp - cw) / 2), int(Dp * 0.55 - cd / 2)))
+        # Cuba que faz parte da família da bancada (não vem como peça separada).
+        # Antes bastava 'CUBA' no nome — e 'BANCADA COZINHA RETA_SEM CUBA'
+        # ganhava cuba. Agora: família 'SEM CUBA' nunca tem; se a ficha traz o
+        # contorno do tampo, a cuba existe só onde o tampo tem FURO (anel
+        # interno) e é desenhada no lugar e no tamanho do furo. Sem contorno
+        # na ficha, vale o nome da família.
+        aneis_t = sorted(o.get('contorno') or [], key=_area_anel, reverse=True)
+        furos = aneis_t[1:]
+        sem_cuba = bool(re.search(r'SEM CUBA|S/ ?CUBA|SEM PIA', t))
+        inox = bool(re.search(r'COZINHA|INOX|QUADRADA|RETANGULAR', t)) and not re.search(r'OVAL|BANHEIRO|LAVATORIO', t)
+        if not o.get('_tem_cuba') and not sem_cuba:
+            if furos:
+                for furo in furos:
+                    pts = _contorno_no_sprite(o, furo, Wp, Dp)
+                    xs_ = [p[0] for p in pts]
+                    ys_ = [p[1] for p in pts]
+                    x0_, y0_ = max(0.0, min(xs_)), max(0.0, min(ys_))
+                    cw, cd = min(Wp, max(xs_)) - x0_, min(Dp, max(ys_)) - y0_
+                    if cw < 0.12 * kk or cd < 0.12 * kk:
+                        continue          # furo de torneira/válvula, não é cuba
+                    cuba = sp_cuba(cw, cd, kk, rng, inox=inox)
+                    im.alpha_composite(cuba, (int(x0_), int(y0_)))
+            elif not aneis_t and re.search(r'CUBA|LAVATORIO|PIA', t):
+                cw, cd = min(Wp * 0.8, 0.50 * kk), min(Dp * 0.7, 0.36 * kk)
+                cuba = sp_cuba(cw, cd, kk, rng, inox=inox)
+                im.alpha_composite(cuba, (int((Wp - cw) / 2), int(Dp * 0.55 - cd / 2)))
     else:
         im = sp_generico(Wp, Dp, kk, rng)
     s = max(1, int(round(im.size[0] / SS))), max(1, int(round(im.size[1] / SS)))

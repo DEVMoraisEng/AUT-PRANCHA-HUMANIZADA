@@ -666,9 +666,15 @@ def sp_bancada(W, D, k, rng, poligono=None, cozinha=False):
     else:
         _rr(d, (0, 0, W, D), 0.01 * k, _cor(pedra) + (255,))
     arr = np.asarray(im).astype(np.float32)
+    alfa_ = arr[..., 3] > 127
     n = _ruido(arr.shape[0], arr.shape[1], 1.3, rng)
     n2 = _fbm(arr.shape[0], arr.shape[1], max(4, 0.15 * k), rng, 3)
     arr[..., :3] *= (1 + (n[..., None] - 0.5) * (0.35 if cozinha else 0.04) + (n2[..., None] - 0.5) * 0.06)
+    # borda do tampo: granito claro (Branco Itaúnas) sobre porcelanato claro
+    # sumia — a bancada parecia piso. A borda marca o tampo sem mudar a cor.
+    lw = max(1, int(round(0.012 * k)))
+    borda = alfa_ & ~ndimage.binary_erosion(alfa_, iterations=lw)
+    arr[borda, :3] = np.array(_cor(CONTORNO), np.float32)
     im = Image.fromarray(arr.clip(0, 255).astype(np.uint8), 'RGBA')
     return _sombreado(im, 0.14, raio=0.05 * k)
 
@@ -934,6 +940,12 @@ def _encostar(o, nome, dist_m, tela):
 
 def tipo_do_objeto(o):
     t = norm(u'{} {} {}'.format(o.get('familia', ''), o.get('tipo', ''), o.get('categoria', '')))
+    # louça/metal (PlumbingFixtures) é a CUBA, mesmo que a família se chame
+    # "Bancada cozinha com cuba": a bancada de verdade é o Casework. Tratada
+    # como bancada ela virava um 2º tampo e a bancada real ganhava outra cuba.
+    if norm(o.get('categoria', '')) == 'PLUMBINGFIXTURES' and re.search(r'CUBA|PIA\b|SINK|LAVATORIO', t) \
+            and not re.search(r'TANQUE', t):
+        return 'cuba', 3
     for rx, nome, camada in CATALOGO:
         if re.search(norm(rx), t):
             return nome, camada
@@ -1026,7 +1038,8 @@ def vegetacao_do_pdf(page, ficha):
 
     No PDF eles são círculos desenhados em pedaços de reta. Círculo liso →
     arbusto; círculo com grade dentro → tampa/grelha. Círculo dentro de
-    ambiente fica de fora (cuba, ralo de box, mesa redonda já vêm da ficha)."""
+    ambiente fica de fora (cuba, ralo de box, mesa redonda já vêm da ficha),
+    a não ser que o ambiente seja de grama (ÁREA PERMEÁVEL, JARDIM)."""
     if page is None:
         return []
     mapa = _pdf_para_modelo(page, ficha)
@@ -1086,8 +1099,10 @@ def vegetacao_do_pdf(page, ficha):
         rm = g['r'] / pt_m
         if not (ax0 - 0.05 <= mxm <= ax1 + 0.05 and y0l <= mym <= y1l):
             continue
-        if any(sum(1 for anel in c if _dentro(mxm, mym, anel)) % 2 == 1 for c in amb):
-            continue
+        dono = next((a for a in ficha.get('ambientes') or []
+                     if sum(1 for anel in a.get('contorno') or [] if _dentro(mxm, mym, anel)) % 2 == 1), None)
+        if dono is not None and material_do_ambiente(dono, ficha.get('pisos'))[0] != 'grama':
+            continue                   # dentro de cômodo: cuba, ralo, mesa — já vem da ficha
         grade = sum(1 for p, q in retas
                     if math.hypot(p.x - g['cx'], p.y - g['cy']) <= g['r'] * 1.05
                     and math.hypot(q.x - g['cx'], q.y - g['cy']) <= g['r'] * 1.05
@@ -1114,6 +1129,16 @@ def _aneis_de(item):
     if item and isinstance(item[0], (list, tuple)) and item[0] and isinstance(item[0][0], (int, float)):
         return [item]
     return item or []
+
+
+def _na_faixa(p, ficha):
+    """Piso não mais largo que a casa (canteiro do lote, não o terreno do
+    loteamento inteiro). O terreno geral sem material continua concreto."""
+    xs = [q[0] for a in ficha.get('ambientes') or [] for anel in a.get('contorno') or [] for q in anel]
+    px = [q[0] for anel in p.get('contorno') or [] for q in anel]
+    if not xs or not px:
+        return False
+    return max(px) - min(px) <= 1.5 * (max(xs) - min(xs)) + 1.0
 
 
 def _limites(ficha):
@@ -1294,7 +1319,12 @@ def _desenhar_sprite(nome, W, D, k, rng, o, tela):
             ys_ = [p[1] for p in cont[0]]
             caixa_ = (max(xs_) - min(xs_)) * (max(ys_) - min(ys_)) or 1.0
             a_ = _area_anel(cont[0])
-            if a_ / caixa_ > 0.9 or a_ < 0.6 * (o.get('largura') or 0) * (o.get('fundo') or 0):
+            # retângulo → pegada. Contorno que não cobre a peça (só um pedaço
+            # do tampo) → pegada. Mas o L/U cobre a pegada INTEIRA com área
+            # bem menor que ela: antes caía no 2º teste e virava um retângulo
+            # cheio de 2,65 x 1,60 m tampando a cozinha.
+            peg = (o.get('largura') or 0) * (o.get('fundo') or 0)
+            if a_ / caixa_ > 0.9 or caixa_ < 0.8 * peg or a_ < 0.2 * peg:
                 cont = None
         if cont:
             # contorno real (bancada em L) no referencial do sprite
@@ -1399,7 +1429,7 @@ def renderizar(ficha, px_m=None, max_px=5200, margem_m=0.25, rotulos=True, fonte
     for i, p in enumerate(pisos):
         mat, tam, expl = classificar_piso(p.get('texto', ''))
         topo = norm(p.get('categoria', '')) == 'TOPOSOLID'
-        if topo and not expl:
+        if topo and not expl and _na_faixa(p, ficha):
             # terreno sem material no Revit é o chão natural do lote: jardim,
             # não concreto (era isso que apagava a grama da garagem/quintal)
             mat, tam = 'grama', None
